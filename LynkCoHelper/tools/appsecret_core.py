@@ -521,24 +521,53 @@ class Proxy:
         self.upstream_ready.wait()
         if self.aborted:
             return
-        # 3. 抢先连接上游（命中早期窗口）并完成握手
-        try:
-            up = socket.socket()
-            up.settimeout(_vt(10))
-            up.connect(("127.0.0.1", UPSTREAM_PORT))
-            up.sendall(b"JDWP-Handshake")
-            echo = b""
-            while len(echo) < 14:
-                c = up.recv(14 - len(echo))
-                if not c:
-                    raise RuntimeError("上游握手被关闭")
-                echo += c
-            assert echo == b"JDWP-Handshake"
-        except (OSError, RuntimeError, AssertionError):
-            # 上游异常（jdwp 端口随进程退出而消失等）：标记失败，
-            # 由主流程立即终止本次尝试，不再傻等满超时
-            self.upstream_failed.set()
-            return
+        print("[*] [proxy] upstream_ready 已收到，开始连接上游 ...", flush=True)
+        # 3. 抢先连接上游（命中早期窗口）并完成握手。
+        # libndk 翻译环境（x86_64 镜像跑 arm64 库）下，am start 后 ART 运行时
+        # 初始化 + JDWP 注册要几十秒，而 adb forward 建好后立即 connect 会
+        # 因 jdwp 端点未注册而 EOF——在窗口内小步重试，默认窗口 10s 不变
+        echo = None
+        up = None
+        _uw = _vt(int(os.environ.get("LYNKCO_UPSTREAM_TIMEOUT", "10")))
+        _deadline = time.time() + _uw
+        while True:
+            try:
+                # forward 若在 jdwp 注册前建立，会被 adb 绑在空端点上且不会
+                # 重解析，之后 connect 永远 EOF——每次尝试前刷新 forward
+                _rf = getattr(self, "refresh_upstream", None)
+                if _rf:
+                    _rf()
+                print("[*] [proxy] 刷新完成，尝试 connect ...", flush=True)
+                if up is None:
+                    up = socket.socket()
+                    # 单次尝试短超时，窗口内反复重试（jdwp 注册晚于 forward
+                    # 建立时，adb 可能对 connect 静默挂起，长超时会吃满窗口）
+                    up.settimeout(5.0)
+                up.connect(("127.0.0.1", UPSTREAM_PORT))
+                up.sendall(b"JDWP-Handshake")
+                echo = b""
+                while len(echo) < 14:
+                    c = up.recv(14 - len(echo))
+                    if not c:
+                        raise RuntimeError("上游握手被关闭")
+                    echo += c
+                assert echo == b"JDWP-Handshake"
+                break
+            except (OSError, RuntimeError, AssertionError) as _e:
+                # 上游异常（jdwp 未注册/进程退出等）：窗口内重试，窗口耗尽
+                # 才标记失败，由主流程终止本次尝试
+                print(f"[*] 上游尝试失败: {_e}", flush=True)
+                if up is not None:
+                    try:
+                        up.close()
+                    except OSError:
+                        pass
+                    up = None
+                    echo = None
+                if time.time() >= _deadline:
+                    self.upstream_failed.set()
+                    return
+                time.sleep(1.5)
         up.settimeout(None)
         self.up_sock = up
         self.jdb_sock.sendall(echo)  # 把握手回显交给 jdb
@@ -711,7 +740,7 @@ def run_once():
     child = None
     try:
         print(f"[*] Using jdb: {JDB}")
-        child = pexpect.spawn(f"{shlex.quote(JDB)} -attach {PROXY_PORT}",
+        child = pexpect.spawn(f"{shlex.quote(JDB)} -attach 127.0.0.1:{PROXY_PORT}",
                               timeout=60, encoding="utf-8")
         child.logfile = sys.stdout
 
@@ -747,13 +776,36 @@ def run_once():
                                "（adb shell pm list packages | grep lynkco）")
         print(f"[*] PID={pid} (t={time.time()-t0:.2f}s)，立即建立转发 ...")
         adb("forward", f"tcp:{UPSTREAM_PORT}", f"jdwp:{pid}")
+
+        _jdwp_kick = {"p": None}
+
+        def _refresh(p=pid):
+            # 踢醒并保持 adbd 的 jdwp 扫描器：挂起 VM（am start -D）的 JDWP
+            # 注册依赖 adbd tracker 扫描 /proc，且 tracker 只在有活跃
+            # `adb jdwp` 客户端时工作——短连即断再立刻 connect 反而踩上
+            # tracker 刚停的空窗。故后台常驻一个客户端，让扫描持续进行，
+            # 再刷新 forward 让 adb 重新解析端点
+            try:
+                if _jdwp_kick["p"] is None or _jdwp_kick["p"].poll() is not None:
+                    _jdwp_kick["p"] = subprocess.Popen(
+                        [ADB, "jdwp"], stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
+                    import atexit
+                    atexit.register(lambda q=_jdwp_kick["p"]:
+                                    q.kill() if q.poll() is None else None)
+            except Exception:
+                pass
+            adb("forward", f"tcp:{UPSTREAM_PORT}", f"jdwp:{p}")
+
+        proxy.refresh_upstream = _refresh
         proxy.upstream_ready.set()
 
         # 新装 285MB App 首启需 dex 校验，模拟器负载高时（TCG 全系统模拟
         # 尤甚）VM 达到等待调试器状态可能较慢，窗口按平台放大；但若上游
         # 连接失败（进程秒退，如加固壳异常退出），立即失败进入重试，
         # 不浪费整个超时窗口
-        deadline = time.time() + _vt(60)
+        deadline = time.time() + _vt(int(os.environ.get(
+            "LYNKCO_UPSTREAM_TIMEOUT", "60")))
         while not proxy.handshake_done.is_set():
             if proxy.upstream_failed.is_set():
                 _dump_device_diagnostics("上游连接失败（App 进程大概率已退出）")

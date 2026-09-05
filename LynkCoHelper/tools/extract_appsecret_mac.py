@@ -9,8 +9,8 @@ nativeAppSecret（平台共享核心见 appsecret_core.py）。
   （JVM）冷启动需 1-3s 赶不上。故由本地 TCP 代理抢先完成握手，再把字节流
   双向转发给 jdb 下断点提取。
 
-用法（在仓库根目录执行，详见文档第 7 节）：
-  python3 LynkCoHelper/tools/extract_appsecret.py            # 无设备时自动冷启动 AVD
+用法（在仓库根目录执行，详见文档第 7 节；脚本已置可执行位，两种调用等价）：
+  ./LynkCoHelper/tools/extract_appsecret.py             # 无设备时自动冷启动 AVD
   python3 LynkCoHelper/tools/extract_appsecret.py <AVD名字>  # 指定要冷启动的 AVD
 
 macOS 自动化内容（核心流程与全自动版共用 appsecret_core.py）：

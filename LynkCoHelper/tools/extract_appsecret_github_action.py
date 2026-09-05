@@ -17,8 +17,8 @@ extract_appsecret_auto.py —— 全自动版（CI / 无本地 Android 环境的
     的 arm64 guest 在 macOS 上死绑 HVF（-accel off 无效、-qemu 直通
     -accel tcg 即 fatal），且预装 darwin-x86_64 包不含 qemu-system-aarch64
 
-用法（在仓库根目录执行，详见文档第 7 节）：
-  python3 LynkCoHelper/tools/extract_appsecret_auto.py            # 全自动
+用法（在仓库根目录执行，详见文档第 7 节；脚本已置可执行位，两种调用等价）：
+  ./LynkCoHelper/tools/extract_appsecret_auto.py            # 全自动
   python3 LynkCoHelper/tools/extract_appsecret_auto.py <AVD名字>  # 指定 AVD
 
 全自动内容（核心流程与 macOS 版共用 appsecret_core.py）：
