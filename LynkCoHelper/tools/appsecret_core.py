@@ -343,10 +343,16 @@ def ensure_apk():
         _download(f"https://app-cdn.lynkco.com/android/lynkco-64-v{ver}.apk",
                   apk, 285)
     print(f"[*] 安装 APK: {apk}")
-    out = adb("install", "-r", apk)
+    r = subprocess.run([ADB, "install", "-r", apk], capture_output=True, text=True)
+    out = "\n".join(p for p in (r.stdout.strip(), r.stderr.strip()) if p)
     if out:
-        print(f"    {out.splitlines()[-1]}")
+        print("    " + out.replace("\n", "\n    "))
     if not _app_installed():
+        # 安装失败诊断：adb 把安装失败原因（如 Failure
+        # [INSTALL_FAILED_NO_MATCHING_ABIS]）打到 stderr，且 x86_64 镜像
+        # 是否带 ARM 翻译层直接决定 arm64-only APK 能否装上
+        print(f"[!] 设备 CPU ABI 列表: "
+              f"{adb('shell', 'getprop', 'ro.product.cpu.abilist')}")
         sys.exit(f"[!] APK 安装后仍未检测到 {APP}，请人工检查")
 
 

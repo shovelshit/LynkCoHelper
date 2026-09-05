@@ -69,19 +69,27 @@ _IS_MAC = sys.platform == "darwin"
 # 与 API 级别无关，文档 7.1 节亦确认 31~34 均可）。
 #
 # 实验：LYNKCO_IMAGE_ABI=x86_64（仅 Linux x86_64 宿主）——x86_64 镜像 +
-# KVM 硬件加速，冷启动从 TCG 的 20~50 分钟降到 2~5 分钟；领克的 arm64
-# 库由镜像自带的 libndk 翻译执行。前置观察：App 在该环境下能存活数秒
-# 才被杀（非立即段错误），说明壳的 native 代码可执行、死于环境检测，
-# 理论上 0.5s 抢握手 + 2 次 next 的提取窗口可能赶在自杀前完成——
-# 本开关即为此实测而设，结论以运行结果为准。
+# KVM 硬件加速，冷启动从 TCG 的 20~50 分钟降到约 45 秒；领克的 arm64
+# 库由镜像自带的 libndk 翻译执行（须用 API34 镜像：API33 的 x86_64 镜像
+# abilist 仅 x86_64，APK 直接 INSTALL_FAILED_NO_MATCHING_ABIS）。
+# ⚠️ 已实测定案不可行（2026-09-03，run 33768167646，勿再踩）：
+# APK 可正常安装、App 可启动，但加固壳 native 代码在 libndk 翻译下
+# 启动约 3 秒即 SIGSEGV（SEGV_ACCERR，崩溃点在翻译后的匿名可执行
+# 映射），死在 JDWP 握手完成之前，3 次重试同型失败。arm64 真实指令
+# 执行（本脚本默认路线）仍是唯一稳定选择。
 _ABI = os.environ.get("LYNKCO_IMAGE_ABI", "arm64-v8a")
 if _ABI not in ("arm64-v8a", "x86_64"):
     sys.exit(f"[!] 不支持的 LYNKCO_IMAGE_ABI={_ABI}（可选 arm64-v8a / x86_64）")
 _IS_X86_IMAGE = _ABI == "x86_64"
-_API = "33"
-_SYSIMG_PKG_RE = rf"({_ABI}-33_r\d+\.zip)"
-_SYSIMG_FALLBACK = f"sys-img/google_apis/{_ABI}-33_r17.zip"
-_SYSIMG_MB = 1700 if not _IS_X86_IMAGE else 1000
+# 镜像 API：arm64 用 33（本地 Mac 实测稳定）；x86_64 实验用 34——
+# 已抽取镜像 build.prop 实证：API31/34 的 x86_64 镜像 abilist 含
+# arm64-v8a（带 libndk 翻译，可装 arm64 APK），API33 仅 x86_64
+# （INSTALL_FAILED_NO_MATCHING_ABIS，run 33766293821 实测）
+_API = "34" if _IS_X86_IMAGE else "33"
+_SYSIMG_PKG_RE = rf"({_ABI}-{_API}_r\d+\.zip)"
+_SYSIMG_FALLBACK = f"sys-img/google_apis/{_ABI}-{_API}_r12.zip" \
+    if _IS_X86_IMAGE else "sys-img/google_apis/arm64-v8a-33_r17.zip"
+_SYSIMG_MB = 1700 if not _IS_X86_IMAGE else 1200
 # AVD 名带 ABI 后缀：避免与（可能已存在的）arm64 AVD 配置互相覆盖
 _AVD_NAME = "lynkco_helper_avd" if not _IS_X86_IMAGE else "lynkco_helper_avd_x64"
 if _IS_X86_IMAGE:
@@ -435,7 +443,8 @@ def main():
                  "（x86_64 镜像 + KVM + libndk 翻译 arm64 库）。")
     if _IS_X86_IMAGE:
         print("[*] 实验模式：x86_64 镜像 + KVM，领克 arm64 库经 libndk 翻译执行。")
-        print("    若壳在 <clinit> 前完成环境检测自杀，本路线即失败（预期内）。")
+        print("    已实证：壳翻译执行约 3 秒即 SIGSEGV（run 33768167646），"
+              "本路线预期失败，仅作复现验证。")
     core.ensure_pexpect()
     core.setup(ensure_adb(), ensure_jdb())
     print(f"[*] adb: {core.ADB}")
