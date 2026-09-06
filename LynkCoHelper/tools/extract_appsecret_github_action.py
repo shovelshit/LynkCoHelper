@@ -325,9 +325,15 @@ def ensure_emulator(existing_emu=None):
     if not os.path.exists(emu) or not os.path.exists(sysimg_dir):
         emu_pkg, sysimg_pkg = _fetch_latest_pkg_names()
         if _IS_X86_IMAGE:
-            # x86_64 镜像钉死 r09：XML 里"最新"是 r12，已移除 arm64 翻译，
-            # 装 APK 会 INSTALL_FAILED_NO_MATCHING_ABIS，必须用钉住的包名
+            # x86_64 路线全套钉死（与本地实测成功环境逐位对齐）：
+            # 1) 镜像钉 r09：XML 里"最新"是 r12，已移除 arm64 翻译，
+            #    装 APK 会 INSTALL_FAILED_NO_MATCHING_ABIS
+            # 2) emulator 钉 31.3.10（build 8807927）：37.x 新模拟器对该
+            #    镜像运行时 abilist 只报 x86_64（run 34008355596 实测
+            #    INSTALL_FAILED_NO_MATCHING_ABIS），31.3.10 则正常上报
+            #    x86_64,arm64-v8a 且 libndk 翻译可用
             sysimg_pkg = _SYSIMG_FALLBACK
+            emu_pkg = "emulator-linux_x64-8807927.zip"
 
     # 1. emulator（最新官方包，约 350MB）
     if not os.path.exists(emu):
