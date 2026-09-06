@@ -332,23 +332,38 @@ def _app_installed(tries=6, wait=5):
 
 def ensure_apk():
     """设备未装领克 App 时自动安装（平台无关）：查询官方接口拿最新
-    版本号，从领克官方 CDN 下载（约 285MB，已下载则复用）后 adb install。"""
+    版本号，从领克官方 CDN 下载（约 285MB，已下载则复用）后 adb install。
+    GitHub Actions 模式优先用 fetch-lynkco-apk workflow 上传到 Release
+    的稳定资产（仅 CI 启用；本地平台保持官方 CDN 直下）。"""
     if _app_installed():
         return
-    try:
-        data = json.loads(urllib.request.urlopen(LYNKCO_VER_API, timeout=15).read())
-        ver = (data.get("data") or {}).get("androidNewestVersion", "").lstrip("V")
-    except Exception:
-        ver = ""
-    if not ver:
-        sys.exit(f"[!] 设备上未安装 {APP} 且无法查询最新版本号，请手动安装后重试")
-    apk = os.path.join(TOOLS_DIR, f"lynkco-v{ver}.apk")
-    if not os.path.exists(apk):
-        if not _confirm_download(f"领克 App v{ver} APK", 285, apk):
-            sys.exit("[!] 未安装 App 且跳过下载，退出。")
-        os.makedirs(TOOLS_DIR, exist_ok=True)
-        _download(f"https://app-cdn.lynkco.com/android/lynkco-64-v{ver}.apk",
-                  apk, 285)
+    apk = None
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        repo = os.environ.get("GITHUB_REPOSITORY", "")
+        rel_url = (f"https://github.com/{repo}/releases/download/"
+                   "apk-latest/lynkco-latest.apk")
+        dest = os.path.join(TOOLS_DIR, "lynkco-latest.apk")
+        print("[*] 尝试从仓库 Release 拉取 APK ...")
+        if _try_download(rel_url, dest, 285):
+            apk = dest
+    if apk is None:
+        try:
+            data = json.loads(urllib.request.urlopen(LYNKCO_VER_API,
+                                                     timeout=15).read())
+            ver = (data.get("data") or {}).get(
+                "androidNewestVersion", "").lstrip("V")
+        except Exception:
+            ver = ""
+        if not ver:
+            sys.exit(f"[!] 设备上未安装 {APP} 且无法查询最新版本号，"
+                     "请手动安装后重试")
+        apk = os.path.join(TOOLS_DIR, f"lynkco-v{ver}.apk")
+        if not os.path.exists(apk):
+            if not _confirm_download(f"领克 App v{ver} APK", 285, apk):
+                sys.exit("[!] 未安装 App 且跳过下载，退出。")
+            os.makedirs(TOOLS_DIR, exist_ok=True)
+            _download(f"https://app-cdn.lynkco.com/android/"
+                      f"lynkco-64-v{ver}.apk", apk, 285)
     print(f"[*] 安装 APK: {apk}")
     r = subprocess.run([ADB, "install", "-r", apk], capture_output=True, text=True)
     out = "\n".join(p for p in (r.stdout.strip(), r.stderr.strip()) if p)

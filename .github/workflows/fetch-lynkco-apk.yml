@@ -1,0 +1,27 @@
+name: fetch-lynkco-apk 
+ 
+# 定期获取最新版领克 APK 并上传到仓库 Release： 
+#   apk-v VERSION  版本 tag（留历史） 
+#   apk-latest     固定 tag，资产 lynkco-latest.apk（提取 CI 的稳定下载源） 
+on: 
+  schedule: 
+    - cron: "0 22 * * *" 
+  workflow_dispatch: 
+ 
+permissions: 
+  contents: write 
+ 
+jobs: 
+  fetch: 
+    runs-on: ubuntu-latest 
+    timeout-minutes: 20 
+    steps: 
+      - uses: actions/checkout@v4 
+      - uses: actions/setup-python@v5 
+        with: 
+          python-version: "3.12" 
+      - name: 获取最新 APK 并上传 Release 
+        env: 
+          GH_TOKEN: ${{ github.token }} 
+          GITHUB_REPOSITORY: ${{ github.repository }} 
+        run: python3 LynkCoHelper/tools/fetch_latest_apk.py 
