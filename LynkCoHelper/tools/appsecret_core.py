@@ -723,10 +723,15 @@ def looks_valid(v):
     return bool(v) and VALUE_RE.fullmatch(v) is not None
 
 
+def _in_ci():
+    """是否运行在 GitHub Actions（公开日志，需要脱敏）。"""
+    return os.environ.get("GITHUB_ACTIONS") == "true"
+
+
 def mask_secret(v):
-    """脱敏显示：前 3 后 2 可见，中间以 *** 代替（过短则全遮）。
-    公开 CI 日志任何人可读，密钥值绝不能明文出现。"""
-    if not v:
+    """脱敏显示：仅 CI（公开日志）生效——前 3 后 2 可见，中间以 *** 代替；
+    本地环境返回原值，方便直接复制使用。"""
+    if not v or not _in_ci():
         return v
     if len(v) <= 8:
         return "***"
@@ -734,7 +739,10 @@ def mask_secret(v):
 
 
 def scrub_jdb(out):
-    """抹掉 jdb 原始输出中的字段值（= "..." 形式），防日志泄漏。"""
+    """抹掉 jdb 原始输出中的字段值（= "..." 形式）。仅 CI 生效，
+    本地环境原样返回。"""
+    if not _in_ci():
+        return out or ""
     return re.sub(r'=\s*"[^"]+"', '= "******"', out or "")
 
 
@@ -949,7 +957,7 @@ def run_once():
                                       timeout=_vt(10))
 
         print("\n" + "=" * 60)
-        print("[RESULT]（值已脱敏，明文仅写入 env.json）")
+        print("[RESULT]" + ("（CI 日志：值已脱敏）" if _in_ci() else ""))
         for field, out in results.items():
             print(f"--- {field} raw output ---")
             print(scrub_jdb(out))
