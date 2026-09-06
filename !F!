@@ -1,8 +1,0 @@
-import json, os, sys, time, urllib.error, urllib.request
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-import appsecret_core as core
-REPO = os.environ.get("GITHUB_REPOSITORY", "")
-TOKEN = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
-API = "https://api.github.com"
-UA = "lynkco-apk-fetcher"
