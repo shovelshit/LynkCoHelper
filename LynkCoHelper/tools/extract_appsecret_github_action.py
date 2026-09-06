@@ -382,7 +382,7 @@ def ensure_emulator(existing_emu=None):
                        "x86_64-33-r09-local.zip")
             arc = os.path.join(core.TOOLS_DIR, "x86_64-33-r09-local.zip")
             print(f"[*] 尝试从 Release 拉取实测可用镜像 ...")
-            if _try_download(rel_url, arc, 1500):
+            if core._try_download(rel_url, arc, 1500):
                 print("[*] 解压 Release 镜像 ...")
                 with zipfile.ZipFile(arc) as z:
                     z.extractall(os.path.dirname(sysimg_dir))
