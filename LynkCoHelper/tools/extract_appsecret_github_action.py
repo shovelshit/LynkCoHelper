@@ -374,7 +374,22 @@ def ensure_emulator(existing_emu=None):
             os.makedirs(os.path.dirname(sysimg_dir), exist_ok=True)
             os.rename(wrong_dir, sysimg_dir)
             print(f"[+] 系统镜像已移到正确位置: {sysimg_dir}")
-        else:
+        elif _IS_X86_IMAGE:
+            # x86_64 优先从 Release 拉实测可用镜像：官方 r09 包不含 arm64
+            # 翻译（r10+ 起移除），实测可用的是本地验证过的 r09 变体
+            rel_url = ("https://github.com/shovelshit/LynkCoHelper/releases/"
+                       "download/sysimg-x86_64-33-r09/"
+                       "x86_64-33-r09-local.zip")
+            arc = os.path.join(core.TOOLS_DIR, "x86_64-33-r09-local.zip")
+            print(f"[*] 尝试从 Release 拉取实测可用镜像 ...")
+            if _try_download(rel_url, arc, 1500):
+                print("[*] 解压 Release 镜像 ...")
+                with zipfile.ZipFile(arc) as z:
+                    z.extractall(os.path.dirname(sysimg_dir))
+                os.remove(arc)
+            else:
+                print("[!] Release 镜像不可用，回退官方源 ...")
+        if not os.path.exists(sysimg_dir):
             if not sysimg_pkg:
                 sysimg_pkg = _SYSIMG_FALLBACK
                 print(f"[*] 未从 XML 取到镜像包名，使用已验证版本: {sysimg_pkg}")
