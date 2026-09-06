@@ -353,6 +353,30 @@ def ensure_apk():
         # 是否带 ARM 翻译层直接决定 arm64-only APK 能否装上
         print(f"[!] 设备 CPU ABI 列表: "
               f"{adb('shell', 'getprop', 'ro.product.cpu.abilist')}")
+        # 镜像侧诊断：比对运行时 abilist 与镜像 build.prop 是否一致
+        #（排除镜像内容/下载差异），并输出 system.img 指纹供跨环境比对
+        import glob as _glob
+        import hashlib as _hashlib
+        for bp in _glob.glob(os.path.join(TOOLS_DIR, "sdk", "system-images",
+                                          "android-*", "google_apis", "*",
+                                          "build.prop")):
+            try:
+                for ln in open(bp, encoding="utf-8", errors="replace"):
+                    if "abilist" in ln:
+                        print(f"[diag] {bp}: {ln.strip()}")
+            except OSError:
+                pass
+        for simg in _glob.glob(os.path.join(TOOLS_DIR, "sdk", "system-images",
+                                            "android-*", "google_apis", "*",
+                                            "system.img")):
+            try:
+                h = _hashlib.sha256()
+                with open(simg, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        h.update(chunk)
+                print(f"[diag] {simg} sha256: {h.hexdigest()}")
+            except OSError as e:
+                print(f"[diag] {simg}: {e}")
         sys.exit(f"[!] APK 安装后仍未检测到 {APP}，请人工检查")
 
 
