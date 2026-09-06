@@ -708,6 +708,32 @@ def looks_valid(v):
     return bool(v) and VALUE_RE.fullmatch(v) is not None
 
 
+def mask_secret(v):
+    """脱敏显示：前 3 后 2 可见，中间以 *** 代替（过短则全遮）。
+    公开 CI 日志任何人可读，密钥值绝不能明文出现。"""
+    if not v:
+        return v
+    if len(v) <= 8:
+        return "***"
+    return v[:3] + "***" + v[-2:]
+
+
+def scrub_jdb(out):
+    """抹掉 jdb 原始输出中的字段值（= "..." 形式），防日志泄漏。"""
+    return re.sub(r'=\s*"[^"]+"', '= "******"', out or "")
+
+
+class ScrubStream:
+    """pexpect logfile 包装：实时抹掉 jdb 输出中的字段值。
+    jdb 对 print 命令的应答含密钥明文，直接落 CI 日志即泄漏。"""
+
+    def write(self, s):
+        sys.stdout.write(scrub_jdb(s))
+
+    def flush(self):
+        sys.stdout.flush()
+
+
 def maybe_write_env(key, secret):
     """交互确认后，把提取结果写入 env.json 的 secrets 段。
     设 LYNKCO_AUTO_WRITE=1（CI 场景）免确认，且 env.json 不存在时自动创建。"""
@@ -779,7 +805,7 @@ def run_once():
         print(f"[*] Using jdb: {JDB}")
         child = pexpect.spawn(f"{shlex.quote(JDB)} -attach 127.0.0.1:{PROXY_PORT}",
                               timeout=60, encoding="utf-8")
-        child.logfile = sys.stdout
+        child.logfile = ScrubStream()
 
         # 等 jdb 完成与代理的 TCP 连接（握手暂时挂起）
         for _ in range(50):
@@ -894,7 +920,8 @@ def run_once():
                 send_cmd(child, "next", timeout=_vt(15))
                 out = send_cmd(child, f"print {CLASS}.c", timeout=_vt(10))
                 val = parse_field(out)
-                print(f"    -> c probe: {val!r}")
+                print(f"    -> c probe: "
+                      f"{'有值（' + str(len(val)) + ' 位）' if val else 'None'}")
                 if val:
                     break
         else:
@@ -907,10 +934,10 @@ def run_once():
                                       timeout=_vt(10))
 
         print("\n" + "=" * 60)
-        print("[RESULT]")
+        print("[RESULT]（值已脱敏，明文仅写入 env.json）")
         for field, out in results.items():
             print(f"--- {field} raw output ---")
-            print(out)
+            print(scrub_jdb(out))
         print("=" * 60)
 
         return parse_field(results.get("b", "")), parse_field(results.get("c", ""))
@@ -939,8 +966,8 @@ def extract_main_loop():
                 break
             # 解析出了值但格式异常（含空格/中文/引号等）——多为 jdb 输出错位
             print(f"\n[!] 第 {attempt} 次提取的值格式异常（疑似 jdb 输出不同步）：")
-            print(f"    nativeAppKey    = {key!r}")
-            print(f"    nativeAppSecret = {secret!r}")
+            print(f"    nativeAppKey    = {mask_secret(key)!r}")
+            print(f"    nativeAppSecret = {mask_secret(secret)!r}")
             key = secret = None
             if attempt < MAX_ATTEMPTS:
                 print("[*] 3 秒后自动重试（将重新 force-stop 并启动 App）...")
@@ -952,8 +979,8 @@ def extract_main_loop():
                 time.sleep(3)
 
     if key and secret:
-        print(f"\n[+] 提取成功！nativeAppKey    = {key}")
-        print(f"           nativeAppSecret = {secret}")
+        print(f"\n[+] 提取成功！nativeAppKey    = {mask_secret(key)}")
+        print(f"           nativeAppSecret = {mask_secret(secret)}")
         maybe_write_env(key, secret)
     else:
         print("\n[!] 多次尝试均未提取到 b/c 字段值。排查建议：")

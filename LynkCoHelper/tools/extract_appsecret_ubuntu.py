@@ -211,7 +211,9 @@ def main():
                     core.send_cmd(child, "next", timeout=60)
                     out = core.send_cmd(child, f"print {CLASS}.c", timeout=30)
                     v = core.parse_field(out)
-                    print(f"probe c: {v!r}", flush=True)
+                    print(f"probe c: "
+                          f"{'有值（' + str(len(v)) + ' 位）' if v else 'None'}",
+                          flush=True)
                     if v:
                         break
             else:
@@ -220,12 +222,13 @@ def main():
             for f in ["b", "c", "d", "e"]:
                 results[f] = core.send_cmd(child, f"print {CLASS}.{f}",
                                            timeout=30)
-                print(f"--- {f} raw: {results[f]!r}", flush=True)
+                print(f"--- {f} raw: {core.scrub_jdb(results[f])!r}",
+                      flush=True)
             key = core.parse_field(results.get("b", ""))
             secret = core.parse_field(results.get("c", ""))
-            print("\n[RESULT]")
-            print(f"    nativeAppKey    = {key}")
-            print(f"    nativeAppSecret = {secret}")
+            print("\n[RESULT]（值已脱敏，明文仅写入 env.json）")
+            print(f"    nativeAppKey    = {core.mask_secret(key)}")
+            print(f"    nativeAppSecret = {core.mask_secret(secret)}")
             if core.looks_valid(key) and core.looks_valid(secret):
                 core.maybe_write_env(key, secret)
                 print("[+] 提取完成")

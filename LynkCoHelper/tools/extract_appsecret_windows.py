@@ -185,7 +185,9 @@ def main():
                     if _wait_line(child,
                                   re.escape(CLASS) + r"\.c\s*=\s*.*", 60):
                         v = core.parse_field(child.after)
-                    print(f"probe c: {v!r}", flush=True)
+                    print(f"probe c: "
+                          f"{'有值（' + str(len(v)) + ' 位）' if v else 'None'}",
+                          flush=True)
                     if v:
                         break
             else:
@@ -198,12 +200,12 @@ def main():
                               re.escape(f"{CLASS}.{f}") + r"\s*=\s*.*", 60):
                     out = child.after
                 results[f] = out
-                print(f"--- {f} raw: {out!r}", flush=True)
+                print(f"--- {f} raw: {core.scrub_jdb(out)!r}", flush=True)
             key = core.parse_field(results.get("b", ""))
             secret = core.parse_field(results.get("c", ""))
-            print("\n[RESULT]")
-            print(f"    nativeAppKey    = {key}")
-            print(f"    nativeAppSecret = {secret}")
+            print("\n[RESULT]（值已脱敏，明文仅写入 env.json）")
+            print(f"    nativeAppKey    = {core.mask_secret(key)}")
+            print(f"    nativeAppSecret = {core.mask_secret(secret)}")
             if core.looks_valid(key) and core.looks_valid(secret):
                 core.maybe_write_env(key, secret)
                 print("[+] 提取完成")
