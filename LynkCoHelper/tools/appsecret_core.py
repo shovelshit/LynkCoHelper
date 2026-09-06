@@ -222,7 +222,8 @@ def _download_to(url, dest_file, interval=10):
     首个系统镜像下载即 [Errno 2] ENOENT）。"""
     req = urllib.request.Request(url, headers={"User-Agent": "lynkco-helper"})
     os.makedirs(os.path.dirname(dest_file) or ".", exist_ok=True)
-    with urllib.request.urlopen(req, timeout=60) as resp, \
+    # 大文件（1.2GB 镜像）在 CDN 偶发 stall 下 60s 读超时不够，放宽到 180s
+    with urllib.request.urlopen(req, timeout=180) as resp, \
             open(dest_file, "wb") as f:
         total = int(resp.headers.get("Content-Length") or 0)
         done = 0
@@ -251,14 +252,20 @@ def _download_to(url, dest_file, interval=10):
 
 
 def _download(url, dest_file, size_mb):
-    """下载文件（失败退出），进度每 10 秒一行。"""
+    """下载文件（中断自动重试，共 3 次机会），进度每 10 秒一行。"""
     print(f"[*] 下载 {url}（约 {size_mb}MB，视网络可能需数分钟）")
-    try:
-        _download_to(url, dest_file)
-    except Exception as e:
-        if os.path.exists(dest_file):
-            os.remove(dest_file)
-        sys.exit(f"[!] 下载失败：{e}\n    可手动下载 {url} 解压到 {TOOLS_DIR} 后重跑")
+    for attempt in range(1, 4):
+        try:
+            _download_to(url, dest_file)
+            return
+        except Exception as e:
+            if os.path.exists(dest_file):
+                os.remove(dest_file)
+            if attempt == 3:
+                sys.exit(f"[!] 下载失败（已重试 3 次）：{e}\n"
+                         f"    可手动下载 {url} 解压到 {TOOLS_DIR} 后重跑")
+            print(f"    [重试 {attempt}/2] 下载中断：{e}，10 秒后重来 ...")
+            time.sleep(10)
 
 
 def _try_download(url, dest_file, size_mb):
