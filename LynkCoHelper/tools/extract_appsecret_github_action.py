@@ -17,8 +17,8 @@ extract_appsecret_auto.py —— 全自动版（CI / 无本地 Android 环境的
     的 arm64 guest 在 macOS 上死绑 HVF（-accel off 无效、-qemu 直通
     -accel tcg 即 fatal），且预装 darwin-x86_64 包不含 qemu-system-aarch64
 
-用法（在仓库根目录执行，详见文档第 7 节）：
-  python3 LynkCoHelper/tools/extract_appsecret_auto.py            # 全自动
+用法（在仓库根目录执行，详见文档第 7 节；脚本已置可执行位，两种调用等价）：
+  ./LynkCoHelper/tools/extract_appsecret_auto.py            # 全自动
   python3 LynkCoHelper/tools/extract_appsecret_auto.py <AVD名字>  # 指定 AVD
 
 全自动内容（核心流程与 macOS 版共用 appsecret_core.py）：
@@ -70,24 +70,24 @@ _IS_MAC = sys.platform == "darwin"
 #
 # 实验：LYNKCO_IMAGE_ABI=x86_64（仅 Linux x86_64 宿主）——x86_64 镜像 +
 # KVM 硬件加速，冷启动从 TCG 的 20~50 分钟降到约 45 秒；领克的 arm64
-# 库由镜像自带的 libndk 翻译执行（须用 API34 镜像：API33 的 x86_64 镜像
-# abilist 仅 x86_64，APK 直接 INSTALL_FAILED_NO_MATCHING_ABIS）。
-# ⚠️ 已实测定案不可行（2026-09-03，run 33768167646，勿再踩）：
-# APK 可正常安装、App 可启动，但加固壳 native 代码在 libndk 翻译下
-# 启动约 3 秒即 SIGSEGV（SEGV_ACCERR，崩溃点在翻译后的匿名可执行
-# 映射），死在 JDWP 握手完成之前，3 次重试同型失败。arm64 真实指令
-# 执行（本脚本默认路线）仍是唯一稳定选择。
+# 库由镜像自带的 libndk 翻译执行。镜像版本是成败关键（2026-09-06 定案）：
+#   - 必须用 API33 的 x86_64-33_r09（abilist 含 arm64-v8a，自带 libndk；
+#     本地 WSL2+KVM 实测连续 7+ 次提取成功）
+#   - x86_64-33_r12 起 Google 移除了 arm64 翻译（abilist 仅 x86_64），
+#     APK 安装直接 INSTALL_FAILED_NO_MATCHING_ABIS（run 33766293821）
+#   - API34 的 x86_64 镜像虽可安装，但加固壳 libndk 翻译下启动约 3 秒
+#     即 SIGSEGV（run 33768167646，3 次重试同型失败）
+# 故本脚本对 x86_64 镜像钉死 r09 版本，不走"取最新"逻辑。
 _ABI = os.environ.get("LYNKCO_IMAGE_ABI", "arm64-v8a")
 if _ABI not in ("arm64-v8a", "x86_64"):
     sys.exit(f"[!] 不支持的 LYNKCO_IMAGE_ABI={_ABI}（可选 arm64-v8a / x86_64）")
 _IS_X86_IMAGE = _ABI == "x86_64"
-# 镜像 API：arm64 用 33（本地 Mac 实测稳定）；x86_64 实验用 34——
-# 已抽取镜像 build.prop 实证：API31/34 的 x86_64 镜像 abilist 含
-# arm64-v8a（带 libndk 翻译，可装 arm64 APK），API33 仅 x86_64
-# （INSTALL_FAILED_NO_MATCHING_ABIS，run 33766293821 实测）
-_API = "34" if _IS_X86_IMAGE else "33"
+# 镜像 API：arm64/x86_64 均用 33。x86_64 用 API33 的 r09 修订版
+# （r10+ 已移除 arm64 翻译；API34 可装但壳 3 秒 SIGSEGV，见上）
+_API = "33"
 _SYSIMG_PKG_RE = rf"({_ABI}-{_API}_r\d+\.zip)"
-_SYSIMG_FALLBACK = f"sys-img/google_apis/{_ABI}-{_API}_r12.zip" \
+# x86_64 钉死 r09：r10+ 的镜像不再含 arm64 翻译（见上）
+_SYSIMG_FALLBACK = f"sys-img/google_apis/{_ABI}-{_API}_r09.zip" \
     if _IS_X86_IMAGE else "sys-img/google_apis/arm64-v8a-33_r17.zip"
 _SYSIMG_MB = 1700 if not _IS_X86_IMAGE else 1200
 # AVD 名带 ABI 后缀：避免与（可能已存在的）arm64 AVD 配置互相覆盖
@@ -324,6 +324,16 @@ def ensure_emulator(existing_emu=None):
     emu_pkg, sysimg_pkg = None, None
     if not os.path.exists(emu) or not os.path.exists(sysimg_dir):
         emu_pkg, sysimg_pkg = _fetch_latest_pkg_names()
+        if _IS_X86_IMAGE:
+            # x86_64 路线全套钉死（与本地实测成功环境逐位对齐）：
+            # 1) 镜像钉 r09：XML 里"最新"是 r12，已移除 arm64 翻译，
+            #    装 APK 会 INSTALL_FAILED_NO_MATCHING_ABIS
+            # 2) emulator 钉 31.3.10（build 8807927）：37.x 新模拟器对该
+            #    镜像运行时 abilist 只报 x86_64（run 34008355596 实测
+            #    INSTALL_FAILED_NO_MATCHING_ABIS），31.3.10 则正常上报
+            #    x86_64,arm64-v8a 且 libndk 翻译可用
+            sysimg_pkg = _SYSIMG_FALLBACK
+            emu_pkg = "emulator-linux_x64-8807927.zip"
 
     # 1. emulator（最新官方包，约 350MB）
     if not os.path.exists(emu):
@@ -364,7 +374,22 @@ def ensure_emulator(existing_emu=None):
             os.makedirs(os.path.dirname(sysimg_dir), exist_ok=True)
             os.rename(wrong_dir, sysimg_dir)
             print(f"[+] 系统镜像已移到正确位置: {sysimg_dir}")
-        else:
+        elif _IS_X86_IMAGE:
+            # x86_64 优先从 Release 拉实测可用镜像：官方 r09 包不含 arm64
+            # 翻译（r10+ 起移除），实测可用的是本地验证过的 r09 变体
+            rel_url = ("https://github.com/shovelshit/LynkCoHelper/releases/"
+                       "download/sysimg-x86_64-33-r09/"
+                       "x86_64-33-r09-local.zip")
+            arc = os.path.join(core.TOOLS_DIR, "x86_64-33-r09-local.zip")
+            print(f"[*] 尝试从 Release 拉取实测可用镜像 ...")
+            if core._try_download(rel_url, arc, 1500):
+                print("[*] 解压 Release 镜像 ...")
+                with zipfile.ZipFile(arc) as z:
+                    z.extractall(os.path.dirname(sysimg_dir))
+                os.remove(arc)
+            else:
+                print("[!] Release 镜像不可用，回退官方源 ...")
+        if not os.path.exists(sysimg_dir):
             if not sysimg_pkg:
                 sysimg_pkg = _SYSIMG_FALLBACK
                 print(f"[*] 未从 XML 取到镜像包名，使用已验证版本: {sysimg_pkg}")

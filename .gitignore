@@ -123,3 +123,7 @@ dmypy.json
 # lynkco_login.py 运行时生成的极验滑块辅助页面（临时文件，含 captchaId 等
 # 会话相关参数，无需保留）
 /LynkCoHelper/geetest_helper.html
+
+work/
+
+.codebuddy/
