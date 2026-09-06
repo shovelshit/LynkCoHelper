@@ -19,6 +19,33 @@
 
 原理、签名算法、接口协议等技术细节见 `docs/` 目录，此处只介绍如何使用。
 
+## AppSecret 自动提取
+
+从模拟器内运行的领克 App 中自动提取 API 密钥（`nativeAppKey` / `nativeAppSecret`），写入 `env.json` 的 `secrets` 段。原理：x86_64 系统镜像（自带 libndk，可翻译执行 arm64 原生库）+ KVM 加速冷启动 + jdb 在加固壳常量类 `<clinit>` 设断点读取字段。
+
+### 按平台入口（`tools/`）
+
+| 脚本 | 平台 | 说明 |
+| --- | --- | --- |
+| `tools/extract_appsecret_mac.py` | macOS（HVF） | 原版交互式流程 |
+| `tools/extract_appsecret_ubuntu.py` | WSL2 Ubuntu（KVM） | 一键式，环境缺失自动下载 |
+| `tools/extract_appsecret_windows.py` | Windows 原生编排 | 模拟器跑在 WSL2，Windows 侧驱动 |
+| `tools/extract_appsecret_github_action.py` | GitHub Actions | 全自动无人值守 |
+
+### CI workflows（`.github/workflows/`）
+
+| Workflow | 触发 | 作用 |
+| --- | --- | --- |
+| `extract-appsecret` | 手动 | 全自动提取密钥 → 写 `env.json` → 同步仓库 Secret `LYNKCO_APP_SECRETS` → Bark 推送（值脱敏） |
+| `fetch-lynkco-apk` | 每日 + 手动 | 拉取最新版领克 APK 上传 Release（`apk-v VERSION` 留历史 + `apk-latest` 稳定资产），提取 CI 优先使用 |
+
+### 安全说明
+
+- 所有日志输出均脱敏（密钥值仅显示前 3 后 2 位），明文只写入本地 `env.json`（gitignore）与仓库 Secret
+- CI 使用的 x86_64 模拟器镜像与 APK 均托管在仓库 Release（`sysimg-x86_64-33-r09` / `apk-latest`），版本经实测钉死，不随上游变动漂移
+
+详细排障（镜像版本坑、IPv6 坑、forward 生命周期坑等）见 `docs/本地一键提取指南.md`。
+
 ## 快速开始
 
 ### 1. 安装依赖
@@ -110,6 +137,7 @@ python3 lynkco_daily_tasks.py    # 签到 + 分享 + 积分查询 + Bark 推送
 
 ## 更多文档
 
+- `docs/本地一键提取指南.md`：AppSecret 自动提取的完整流程、各平台坑位与排障速查。
 - `docs/AppSecret_逆向分析记录.md`：签名密钥的逆向分析过程与获取方式。
 - `docs/登录接口协议说明.md`：登录/续期相关接口协议细节。
 - `docs/分享任务接口说明.md`：分享任务接口协议与限制说明。
