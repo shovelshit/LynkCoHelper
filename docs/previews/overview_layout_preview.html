@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>概览布局设计预览</title>
+  <style>
+    :root {
+      --ink: #27312d;
+      --muted: #7b8781;
+      --line: #dce5df;
+      --green: #197157;
+      --green-soft: #e8f3ed;
+      --surface: #ffffff;
+      --wash: #f6faf7;
+      --orange: #bd8052;
+      --orange-soft: #fcf0e7;
+      --blue-soft: #edf3fb;
+      --blue: #5479ae;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #fbfcfb; font-size: 14px; }
+    main { max-width: 1420px; margin: 0 auto; padding: 36px 48px 64px; }
+    button, select, input { font: inherit; }
+    button { border: 0; cursor: default; }
+    .utility { display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; min-height: 28px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #45a875; display: inline-block; margin-right: 6px; }
+    .icon-button { width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: #5d6963; }
+    .account-strip { display: flex; align-items: center; gap: 14px; padding: 22px 0 25px; border-bottom: 1px solid var(--line); }
+    .avatar { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; color: var(--green); background: #e7f0ea; font-weight: 700; font-size: 18px; }
+    .account-name { margin: 0 0 6px; font-size: 19px; }
+    .account-meta { display: flex; gap: 14px; margin: 0; color: var(--muted); font-size: 12px; }
+    .account-meta span + span { padding-left: 14px; border-left: 1px solid var(--line); }
+    .account-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+    .badge { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: 6px; background: var(--green-soft); color: var(--green); font-size: 12px; }
+    .outline { min-height: 36px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; color: #52605a; background: #fff; }
+    .asset-band { margin-top: 26px; padding: 22px 24px 25px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .asset-heading, .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .asset-heading { color: #64716b; font-size: 14px; }
+    .asset-heading strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+    .asset-kpis { display: flex; align-items: stretch; gap: 28px; margin-top: 17px; }
+    .kpi { display: flex; align-items: baseline; gap: 7px; padding-right: 28px; border-right: 1px solid var(--line); min-width: 146px; }
+    .kpi:last-child { border-right: 0; }
+    .kpi strong { font-size: 28px; line-height: 1; letter-spacing: .01em; }
+    .kpi small { color: var(--muted); font-size: 12px; }
+    .kpi .expiry { align-self: flex-end; margin-left: 4px; margin-bottom: 1px; color: #87938d; font-size: 10px; white-space: nowrap; }
+    .asset-divider { height: 1px; margin: 22px 0 19px; background: var(--line); }
+    .medal-heading { display: flex; align-items: center; gap: 9px; color: #64716b; font-size: 13px; }
+    .medal-heading strong { color: var(--ink); font-weight: 600; }
+    .medal-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+    .medal { display: flex; align-items: center; gap: 11px; min-width: 0; }
+    .medal-icon { width: 42px; height: 42px; flex: 0 0 42px; display: grid; place-items: center; border-radius: 50%; background: var(--orange-soft); color: var(--orange); font-size: 20px; }
+    .medal strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .medal small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .asset-updated { margin-top: 18px; color: var(--muted); font-size: 11px; }
+    .control-grid { display: grid; grid-template-columns: minmax(0, 1.17fr) minmax(420px, 1fr); gap: 34px; margin-top: 30px; padding: 25px 0 27px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .control-grid > section + section { padding-left: 34px; border-left: 1px solid var(--line); }
+    h2 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+    .eyebrow { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .quota { background: var(--blue-soft); color: var(--blue); }
+    .task-control-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 15px; margin-top: 22px; }
+    label { display: grid; gap: 8px; color: #55625c; font-size: 11px; }
+    label span { display: flex; justify-content: space-between; gap: 10px; }
+    label span em { color: var(--muted); font-style: normal; font-size: 10px; }
+    select, input { min-height: 40px; padding: 0 12px; border: 1px solid #cbd9d1; border-radius: 8px; color: var(--ink); background: #fff; }
+    .task-actions { display: flex; gap: 8px; margin-top: 18px; }
+    .task-actions button, .push-footer button { min-height: 38px; padding: 0 13px; border-radius: 8px; font-size: 11px; }
+    .primary { color: #fff; background: #20282c; }
+    .secondary { color: #53615b; background: #fff; border: 1px solid var(--line); }
+    .push-options { display: flex; gap: 5px; width: fit-content; margin-top: 21px; padding: 4px; border-radius: 8px; background: #f1f5f2; }
+    .push-options span { min-width: 86px; padding: 8px 11px; border-radius: 6px; text-align: center; color: #7b8781; font-size: 11px; }
+    .push-options .selected { color: #344039; background: #fff; box-shadow: 0 1px 3px #243b3012; }
+    .push-field { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; margin-top: 16px; }
+    .push-field button { width: 40px; min-height: 40px; border: 1px solid var(--line); border-radius: 8px; color: #6b7770; background: #fff; }
+    .push-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 14px; }
+    .push-footer p { margin: 0; color: var(--muted); font-size: 10px; }
+    .today { padding-top: 28px; }
+    .today-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .today-date { margin-top: 6px; color: var(--muted); font-size: 12px; }
+    .task-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 34px; margin-top: 17px; }
+    .task { display: flex; align-items: center; min-height: 70px; gap: 12px; border-bottom: 1px solid var(--line); }
+    .task-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 7px; color: #71934d; background: #f2f5ee; font-size: 17px; }
+    .task-icon.share { color: var(--orange); background: var(--orange-soft); }
+    .task strong { display: block; font-size: 13px; }
+    .task small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
+    .task-status { margin-left: auto; color: #71934d; font-size: 12px; }
+    .task-status.off { color: var(--muted); }
+    .next-run { display: flex; align-items: center; gap: 7px; margin-top: 16px; color: var(--muted); font-size: 11px; }
+    .recent { margin-top: 28px; padding-top: 25px; border-top: 1px solid var(--line); }
+    .recent p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+    .run-row { display: grid; grid-template-columns: 150px 1fr 110px 180px; gap: 15px; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line); color: #5f6c65; font-size: 11px; }
+    .run-row:first-of-type { margin-top: 13px; }
+    .run-row strong { color: var(--ink); font-weight: 550; }
+    .run-badge { justify-self: start; padding: 5px 8px; border-radius: 5px; color: #5e8b49; background: #eef6e9; }
+    @media (max-width: 900px) {
+      main { padding: 26px 22px 48px; }
+      .medal-list { grid-template-columns: repeat(2, 1fr); }
+      .control-grid { grid-template-columns: 1fr; gap: 27px; }
+      .control-grid > section + section { padding-left: 0; border-left: 0; padding-top: 27px; border-top: 1px solid var(--line); }
+      .task-list { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="utility"><span><i class="dot"></i>云端已连接</span><span>09/24 10:32 更新</span><button class="icon-button">↻</button><button class="icon-button">⏻</button></div>
+    <div class="account-strip">
+      <div class="avatar">石</div>
+      <div><h1 class="account-name">石化战略合作伙伴</h1><p class="account-meta"><span>账号用户</span><span>每日 0-2 点</span><span>连续签到 1125 天</span></p></div>
+      <div class="account-actions"><span class="badge">运行中</span><button class="outline">⚙ 绑定设置</button></div>
+    </div>
+
+    <section class="asset-band">
+      <div class="asset-heading"><span>▣&nbsp; 当前资产</span><strong>最近查询 09/24 10:32</strong></div>
+      <div class="asset-kpis">
+        <div class="kpi"><strong>789</strong><small>积分</small><span class="expiry">即将过期 0</span></div>
+        <div class="kpi"><strong>24</strong><small>签到卡</small></div>
+        <div class="kpi"><strong>2332</strong><small>能量体</small></div>
+      </div>
+      <div class="asset-divider"></div>
+      <div class="medal-heading"><span>♢&nbsp; 我的勋章</span><strong>共 4 枚</strong></div>
+      <div class="medal-list">
+        <div class="medal"><span class="medal-icon">◈</span><div><strong>种草者</strong><small>已获得</small></div></div>
+        <div class="medal"><span class="medal-icon">✦</span><div><strong>推荐者</strong><small>已获得</small></div></div>
+        <div class="medal"><span class="medal-icon">◇</span><div><strong>05Haloman</strong><small>已获得</small></div></div>
+        <div class="medal"><span class="medal-icon">⌁</span><div><strong>Co客领地</strong><small>已获得</small></div></div>
+      </div>
+    </section>
+
+    <div class="control-grid">
+      <section>
+        <div class="section-heading"><div><h2>任务设置</h2><p class="eyebrow">保存后从下一次任务开始生效</p></div><span class="badge quota">名额充足</span></div>
+        <div class="task-control-row"><label><span>每日执行区间（北京时间） <em>每两小时随机执行</em></span><select><option>0-2 点 · 剩余 9/10 · 当前区间</option></select></label><button class="secondary" style="min-height:40px">保存</button></div>
+        <div class="task-actions"><button class="primary">▶ 立即签到一次</button><button class="secondary">Ⅱ 暂停任务</button></div>
+      </section>
+      <section>
+        <div class="section-heading"><div><h2>结果推送</h2><p class="eyebrow">每次任务完成后发送一次结果通知</p></div><span class="badge">可选</span></div>
+        <div class="push-options"><span class="selected">不推送</span><span>Bark</span><span>Server 酱</span></div>
+        <div class="push-field"><label><span>推送渠道 Key</span><input placeholder="选择渠道后填写" /></label><button>⌫</button></div>
+        <div class="push-footer"><p>不推送也会正常执行任务</p><button class="primary">➤ 保存设置</button></div>
+      </section>
+    </div>
+
+    <section class="today">
+      <div class="today-head"><div><h2>今日任务</h2><div class="today-date">2026 年 09 月 24 日</div></div><span class="badge" style="background:#fff4dd;color:#aa7b2e">等待执行</span></div>
+      <div class="task-list">
+        <div class="task"><span class="task-icon">▣</span><div><strong>每日签到</strong><small>每天执行一次</small></div><span class="task-status">待执行　✓</span></div>
+        <div class="task"><span class="task-icon share">⌯</span><div><strong>每日分享</strong><small>签到时同时完成分享</small></div><span class="task-status off">已关闭　—</span></div>
+      </div>
+      <div class="next-run">◷&nbsp; 下一次执行：09/25 00:00</div>
+    </section>
+
+    <section class="recent"><div class="section-heading"><div><h2>最近运行</h2><p>展示最近 7 次云端任务结果</p></div><button class="outline">查看全部　→</button></div>
+      <div class="run-row"><span>09/24 08:53</span><strong>每日任务</strong><span class="run-badge">已完成</span><span>签到 +24 积分 · 分享 +12 能量体</span></div>
+      <div class="run-row"><span>09/23 00:14</span><strong>每日任务</strong><span class="run-badge">已完成</span><span>签到 +18 积分 · 分享 +12 能量体</span></div>
+    </section>
+  </main>
+</body>
+</html>
