@@ -2,11 +2,14 @@
 # 郑重告知：本程序源码仅供学习研究使用，使用该程序造成的一切后果与程序作者无关。本项目并非拿来即用，有技术门槛！！！
 ---
 
-领克 App 自动签到助手，支持每日签到、分享任务、积分查询与 Bark 推送，可通过 GitHub Actions 定时自动运行。
+领+ 的旧版命令行脚本，支持领克 App 每日签到、分享任务、积分查询与 Bark 推送，可通过 GitHub Actions 定时运行。
 
-## 桌面 + 云端助手（试用版）
+## 相关仓库
 
-新增双击启动的本地浏览器界面，支持手机证书配对、完整登录态识别、确认绑定、云端每日任务和运行记录，日常任务不依赖 GitHub Actions。使用说明与验收限制见 [desktop/README.md](desktop/README.md)。云端 Worker、管理后台和迁移脚本独立维护在私有仓库 `shovelshit/LynkCoHelper-Cloud`。
+- 桌面客户端：[`shovelshit/lynkco-plus-desktop`](https://github.com/shovelshit/lynkco-plus-desktop)
+- 云端 Worker 与管理后台：[`shovelshit/LynkCoHelper-Cloud`](https://github.com/shovelshit/LynkCoHelper-Cloud)
+
+本仓库保留原有命令行脚本和 App 逆向工具；桌面客户端已经迁移到独立仓库，云端任务也由独立 Worker 负责。
 
 ## 功能状态
 
@@ -26,4 +29,4 @@
 - [ ] 分享任务仅支持"文章"类型内容，"动态"类型的正确分享链接格式尚未验证
 - [ ] 登录滑块验证码全自动化：极验人机验证无法自动完成，仍需人工操作一次
 
-详细说明（配置方式、token 获取、AppSecret 自动提取、部署步骤等）见 [`LynkCoHelper/readme.md`](LynkCoHelper/readme.md)。
+详细说明（配置方式、token 获取、AppSecret 自动提取等）见 [`LynkCoHelper/readme.md`](LynkCoHelper/readme.md)。

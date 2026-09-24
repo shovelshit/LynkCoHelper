@@ -1,6 +1,0 @@
-mitmproxy==12.2.3
-certifi>=2026.7.22
-keyring>=25.6,<26
-qrcode>=8.2,<9
-psutil>=7.0,<8
-pyinstaller>=6.16,<7
