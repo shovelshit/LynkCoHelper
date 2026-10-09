@@ -188,6 +188,8 @@ def _failure_item(post, status, reason):
 
 def _notify_generated(post, comment, status, result):
     # UGC links are not trusted or published; article links are generated locally.
+    # 链接只出现一次：open_url 让整条通知可点击打开 H5 页，正文不再重复
+    # 同一链接（Bark 会把 url 参数单独渲染成链接行，正文再写会推送两条）。
     url = _article_url(post)
     article_title = post.get("title") or "领克动态"
     try:
@@ -195,8 +197,7 @@ def _notify_generated(post, comment, status, result):
             title=f"领克动态评论｜{status}",
             markdown_body=(f"**动态**：{article_title}\n\n"
                            f"**评论**：{comment}\n\n"
-                           f"**结果**：{status}"
-                           + (f"\n\n**详情**：{url}" if url else "")),
+                           f"**结果**：{status}"),
             group="LynkCo评论", icon=_bark_icon(), open_url=url,
         )
     except Exception as exc:
@@ -345,9 +346,10 @@ def _run_comment_task_unlocked(max_comments: int, dry_run: bool, state_path: Pat
             result["pending"] = len(candidates) - attempted
     if not generated_candidates:
         try:
-            first_url = next((item["share_url"] for item in result["items"] if item.get("share_url")), None)
+            # 各条目的详情链接只在正文里出现一次，不再传 open_url
+            #（首条链接会与正文里的 - 详情行重复）
             send_bark_notification(title="本轮未生成评论", markdown_body=_summary(result),
-                                    group="LynkCo评论", icon=_bark_icon(), open_url=first_url)
+                                    group="LynkCo评论", icon=_bark_icon())
         except Exception as exc:
             result["bark_failed"] = True
             _log(f"本轮汇总 Bark 推送失败 error={type(exc).__name__}: {exc}")
