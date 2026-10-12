@@ -10,7 +10,7 @@ env.json 结构（四个子对象）：
                 "tokenExpireAt": ""},
       "secrets": {"nativeAppKey": "", "nativeAppSecret": "", "nativeAppCode": "",
                   "loginAppCode": ""},
-      "notify": {"barkKey": ""},
+      "notify": {"barkKey": "", "feiShuWebhook": "", "dingTalkWebhook": "", "weComWebhook": ""},
       "ai": {"provider": "chatanywhere", "model": "gpt-4o-mini", "apiKey": ""}
     }
 

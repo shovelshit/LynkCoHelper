@@ -27,6 +27,8 @@ from lynkco_login import load_token
 EP_SIGN_DAY_INFO = "/up/api/v1/user/sign/day/info"
 EP_SIGN_UPGRADE = "/up/api/v1/user/sign/upgrade"  # 真正执行签到的接口（抓包确认，非 /up/api/v1/user/sign）
 EP_CONTINUE_DAYS = "/up/api/v1/userReward/getContinueDaysAndSignCard"
+EP_MY_GROWTH = "/app/energy/my/growth"
+EP_TASK_LIST = "/up/api/v1/userReward/getTaskList"
 
 
 class LynkCoSignClient:
@@ -107,6 +109,16 @@ class LynkCoSignClient:
     def get_continue_days(self) -> dict:
         """查询连续签到天数和签到卡数量"""
         resp = self._request("GET", EP_CONTINUE_DAYS)
+        return resp.json()
+
+    def get_growth(self) -> dict:
+        """查询成长等级和成长值。"""
+        resp = self._request("GET", EP_MY_GROWTH)
+        return resp.json()
+
+    def get_task_list(self) -> dict:
+        """查询签到任务进度。"""
+        resp = self._request("GET", EP_TASK_LIST)
         return resp.json()
 
 

@@ -4,7 +4,7 @@
 
 ## 简介
 
-领克 App「我的-签到」自动化脚本，支持每日签到、分享任务、积分查询，并可通过 Bark 推送结果。
+领克 App「我的-签到」自动化脚本，支持每日签到、签到状态、成长等级、任务进度、分享任务、积分查询，并可通过 Bark、飞书、钉钉、企业微信推送结果。
 
 模块划分：
 
@@ -14,7 +14,7 @@
 | `lynkco_login.py` | token 获取统一入口 `load_token()`，含账号密码/短信验证码全流程登录 |
 | `lynkco_sign.py` | 每日签到逻辑 |
 | `lynkco_share.py` | 分享任务逻辑（可选功能） |
-| `lynkco_notify.py` | Bark 推送工具 |
+| `lynkco_notify.py` | Bark、飞书、钉钉、企业微信推送工具 |
 | `lynkco_daily_tasks.py` | 顶层入口：编排签到 + 分享 + 积分查询并推送结果 |
 | `lynkco_comment.py` | 独立的图文动态评论任务；默认 dry-run，不属于签到/分享任务 |
 
@@ -75,14 +75,17 @@ pip install -r requirements.txt
     "loginAppCode": ""
   },
   "notify": {
-    "barkKey": ""
+    "barkKey": "",
+    "feiShuWebhook": "",
+    "dingTalkWebhook": "",
+    "weComWebhook": ""
   }
 }
 ```
 
 - `user`：账号相关凭据（token 至少需要一个，见下）。
 - `secrets`：领克 App 的应用级签名密钥（非个人凭证，但代码中不内置，必须自行配置），获取方式见 `docs/AppSecret_逆向分析记录.md`。每个字段都支持用同名大写环境变量覆盖（如 `LYNKCO_NATIVE_APP_KEY`）；也可用一个整合环境变量 `LYNKCO_APP_SECRETS`（值为与 `secrets` 结构相同的 JSON 字符串）一次性提供全部 4 个字段，适合 CI 只想配置一个 Secret 的场景（优先级：单独字段环境变量 > `LYNKCO_APP_SECRETS` > `env.json`）。均未配置时程序会直接报错退出。
-- `notify`：推送相关配置，`barkKey` 为 Bark 推送 Key（可选，也可用环境变量 `LYNKCO_BARK_KEY` 覆盖）。
+- `notify`：推送相关配置。支持 `barkKey`、`feiShuWebhook`、`dingTalkWebhook`、`weComWebhook`，也可使用环境变量 `LYNKCO_BARK_KEY`、`LYNKCO_FEISHU_WEBHOOK`、`LYNKCO_DINGTALK_WEBHOOK`、`LYNKCO_WECOM_WEBHOOK` 覆盖。未配置的渠道会跳过。
 
 ### 3. 获取 token
 
@@ -97,7 +100,7 @@ pip install -r requirements.txt
 
 ```bash
 python3 lynkco_helper.py         # 签到 + 分享
-python3 lynkco_daily_tasks.py    # 签到 + 分享 + 积分查询 + Bark 推送
+python3 lynkco_daily_tasks.py    # 签到 + 分享 + 状态查询 + 按配置推送
 ```
 
 分享任务（`lynkco_share.py`）每日有加分次数上限，接口返回成功不代表真正加分，重复调用不会重复加分，详见 `docs/分享任务接口说明.md`。
@@ -107,11 +110,16 @@ python3 lynkco_daily_tasks.py    # 签到 + 分享 + 积分查询 + Bark 推送
 | 变量 | 说明 |
 | --- | --- |
 | `LYNKCO_BARK_KEY` | Bark 推送的 Key，未配置则跳过推送（也可写入 `env.json` 的 `notify.barkKey`） |
+| `LYNKCO_FEISHU_WEBHOOK` | 飞书自定义机器人 Webhook，可选 |
+| `LYNKCO_DINGTALK_WEBHOOK` | 钉钉自定义机器人 Webhook，可选 |
+| `LYNKCO_WECOM_WEBHOOK` | 企业微信机器人 Webhook，可选 |
 | `LYNKCO_ENERGY_DELAY` | 签到/分享后查询积分前的等待秒数，默认 5 |
 | `LYNKCO_BARK_ICON` | Bark 推送使用的自定义图标 URL，可选 |
 | `LYNKCO_TIMEOUT` | 领克接口统一请求超时秒数，默认 30 |
 | `LYNKCO_RETRIES` | 领克接口超时/断连重试次数，默认 2 |
 | `LYNKCO_AI_TIMEOUT` | AI 请求超时秒数，默认 60 |
+
+每日通知包含今日签到状态、连续签到/签到卡、成长等级与成长值、积分变化和任务进度。评论任务同样使用这些通知配置，配置了哪些渠道就发送哪些渠道；单个渠道失败不会影响任务结果。
 
 ### GRIC 车辆接口（独立配置）
 
@@ -150,13 +158,13 @@ python3 lynkco_comment.py --publish --max-comments 1 # 真实发布，最多尝�
 
 真实演练会调用第三方模型，可能产生费用，但不会发送评论 POST。AI 配置优先级为独立环境变量 > `env.json` 的 `ai` 段 > 默认值：默认使用 ChatAnywhere，设置 `ai.provider` 为 `glm` 可切换到 GLM。ChatAnywhere 使用 `CHATANYWHERE_API_KEY` / `CHATANYWHERE_MODEL`，GLM 使用 `GLM_API_KEY`（兼容 `ZHIPU_API_KEY`）/ `GLM_MODEL`；本地也可以直接在 `env.json` 的 `ai.apiKey` 和 `ai.model` 中填写。GLM 图文动态默认使用 `glm-4v-flash`。AI 提示词要求评论最多 50 字，但评论接口和发布校验仍保留 500 字上限。除此之外还需要有效的领克 token（或 refreshToken）及 App 原生签名密钥。所有领克原生请求统一使用最新 HAR 中的 iOS 头：`CA_iOS_SDK_2.0`、`4.2.8`、`40208072`、`iPhone 15 Pro`、`27.0.1`；这些版本和设备头不再按设备差异化配置。发布前通过 `GET /auth/user/info` 的 iOS 原生签名请求，从当前 token 获取 `data.id` 作为评论请求的 `gl_user_id`；userinfo 获取失败会直接终止发布，不使用本地写死账号 ID。`deviceId` 仅从 `LYNKCO_DEVICE_ID` 或 `env.json.user.deviceId` 读取。`LYNKCO_COMMENT_MAX_PER_RUN` 控制每轮最多尝试 1～10 条（默认 1），即使模型失败也不会继续尝试更多动态；`LYNKCO_COMMENT_MAX_AGE_HOURS` 控制发布时间窗口 1～168 小时（默认 48）；`LYNKCO_COMMENT_FEED_PAGES` 控制列表拉取页数 1～20（默认 1，每页 20 条）；命令行 `--max-comments` 优先于环境变量；网络超时统一使用 `LYNKCO_TIMEOUT`。
 
-配置 `LYNKCO_BARK_KEY` 后，每条生成评论各推送一条，文案固定包含动态标题、评论正文和**演练/发布/失败/待核对**状态；文章通知可点击打开对应 H5 分享页。没有生成评论时发送本轮计数汇总。Bark 推送失败不会改变评论确认结果，但会在任务 JSON 中标记 `bark_failed`。成功或结果不明的文章 ID 保存在已忽略的 `.comment_state.json` 中，结果不明时不会自动重发；请核实评论列表后再处理状态。一次受控的 UGC 发布曾返回业务拒绝，不能当成 UGC 可用的证据。
+配置任一通知渠道后，每条生成评论各推送一条，文案固定包含动态标题、评论正文和**演练/发布/失败/待核对**状态；文章通知可点击打开对应 H5 分享页。没有生成评论时发送本轮计数汇总。通知推送失败不会改变评论确认结果。成功或结果不明的文章 ID 保存在已忽略的 `.comment_state.json` 中，结果不明时不会自动重发；请核实评论列表后再处理状态。一次受控的 UGC 发布曾返回业务拒绝，不能当成 UGC 可用的证据。
 
 评论任务相关环境变量：`LYNKCO_COMMENT_MAX_PER_RUN`（每轮尝试 1～10 条，默认 1）、`LYNKCO_COMMENT_MAX_AGE_HOURS`（时间窗口 1～168 小时，默认 48）、`LYNKCO_COMMENT_FEED_PAGES`（列表页数 1～20，默认 1，每页 20 条）、`LYNKCO_AI_TIMEOUT`（模型请求超时，默认 60 秒）。领克原生请求统一使用最新 HAR 的 iOS 请求头，版本和设备字段由公共模块固定管理。
 
 独立的 `.github/workflows/comment-task.yml` 每天北京时间 09:17、15:17、21:17 计划运行，每轮最多尝试 1 篇文章（GitHub 调度可能延迟）；定时运行使用发布模式，手动触发默认演练，勾选 `publish` 才发布。定时配置需位于 GitHub 默认分支才能生效。它使用与本地相同的脚本，运行前只从当前分支最新的 `lynkco-comment-state` artifact 恢复去重状态，首次无 artifact 时从 `LYNKCO_COMMENT_BOOTSTRAP_STATE` Secret 导入；发布时两者都没有会中止。运行后上传状态 artifact，评论部分成功而后续失败也会保留已记录的 ID。若 Runner 在评论已被服务端接受、但最终 artifact 上传前中断，下一轮前必须先核对评论列表，再处理状态，不能盲目重发。既有的 `daily-tasks.yml` 不会执行评论。
 
-评论工作流的 Actions Secrets：`LYNKCO_REFRESH_TOKEN`、`LYNKCO_DEVICE_ID`、`LYNKCO_APP_SECRETS`、`CHATANYWHERE_API_KEY`、`GLM_API_KEY`；`LYNKCO_BARK_KEY` 和 `LYNKCO_BARK_ICON` 可选。默认通过 userinfo 接口实时获取当前账号，不需要配置账号 ID。通过 Actions Variable `LYNKCO_AI_PROVIDER=glm` 切换到 GLM，模型可用 `GLM_MODEL` 覆盖。已在本地发布过评论时，用当前 `.comment_state.json` 的内容初始化 `LYNKCO_COMMENT_BOOTSTRAP_STATE` Secret，避免首次 CI 运行重复评论；之后以同一分支的最新 artifact 为准。Actions Variables 可设置 `LYNKCO_COMMENT_MAX_PER_RUN`、`LYNKCO_COMMENT_MAX_AGE_HOURS`、`LYNKCO_COMMENT_FEED_PAGES`、`LYNKCO_TIMEOUT`、`LYNKCO_AI_TIMEOUT` 和 `LYNKCO_RETRIES`。密钥不要写入仓库、命令行参数或工作流文件。
+评论工作流的 Actions Secrets：`LYNKCO_REFRESH_TOKEN`、`LYNKCO_DEVICE_ID`、`LYNKCO_APP_SECRETS`、`CHATANYWHERE_API_KEY`、`GLM_API_KEY`；`LYNKCO_BARK_KEY`、`LYNKCO_FEISHU_WEBHOOK`、`LYNKCO_DINGTALK_WEBHOOK`、`LYNKCO_WECOM_WEBHOOK` 和 `LYNKCO_BARK_ICON` 可选。默认通过 userinfo 接口实时获取当前账号，不需要配置账号 ID。通过 Actions Variable `LYNKCO_AI_PROVIDER=glm` 切换到 GLM，模型可用 `GLM_MODEL` 覆盖。已在本地发布过评论时，用当前 `.comment_state.json` 的内容初始化 `LYNKCO_COMMENT_BOOTSTRAP_STATE` Secret，避免首次 CI 运行重复评论；之后以同一分支的最新 artifact 为准。Actions Variables 可设置 `LYNKCO_COMMENT_MAX_PER_RUN`、`LYNKCO_COMMENT_MAX_AGE_HOURS`、`LYNKCO_COMMENT_FEED_PAGES`、`LYNKCO_TIMEOUT`、`LYNKCO_AI_TIMEOUT` 和 `LYNKCO_RETRIES`。密钥不要写入仓库、命令行参数或工作流文件。
 
 ## 部署到 GitHub Actions 定时执行
 
@@ -170,7 +178,7 @@ python3 lynkco_comment.py --publish --max-comments 1 # 真实发布，最多尝�
      {"nativeAppKey":"...","nativeAppSecret":"...","nativeAppCode":"...","loginAppCode":"..."}
      ```
      （如果不想合并配置，也可改用 4 个独立的 `LYNKCO_NATIVE_APP_KEY` 等 Secret，同时修改 workflow 中的 `env` 字段）。
-   - 可选：`LYNKCO_BARK_KEY`（daily-tasks 的 Bark 推送）。
+   - 可选：`LYNKCO_BARK_KEY`、`LYNKCO_FEISHU_WEBHOOK`、`LYNKCO_DINGTALK_WEBHOOK`、`LYNKCO_WECOM_WEBHOOK`（daily-tasks 的通知渠道）。
 3. 可在 `Actions` 页面手动触发一次 workflow 验证。
 4. 仅配置 `LYNKCO_TOKEN` 时，token 失效后需要手动更新；配置 `refreshToken` 后可自动续期，仅需在其过期（约 30 天）时才需人工干预。
 

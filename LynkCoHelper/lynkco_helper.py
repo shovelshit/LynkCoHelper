@@ -7,7 +7,7 @@
     - lynkco_login.py        token 获取统一入口 load_token()，另含账号密码/短信验证码全流程登录
     - lynkco_sign.py         每日签到逻辑
     - lynkco_share.py        分享任务逻辑（可选功能）
-    - lynkco_notify.py       Bark 推送工具
+    - lynkco_notify.py       多渠道推送工具
     - lynkco_daily_tasks.py  每日任务顶层入口：编排签到+分享+积分查询并推送结果
 
 使用前提：

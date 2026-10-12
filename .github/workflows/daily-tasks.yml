@@ -41,6 +41,9 @@ jobs:
         LYNKCO_DEVICE_ID: ${{ secrets.LYNKCO_DEVICE_ID }}
         # Bark 推送 key，详见 lynkco_notify.py
         LYNKCO_BARK_KEY: ${{ secrets.LYNKCO_BARK_KEY }}
+        LYNKCO_FEISHU_WEBHOOK: ${{ secrets.LYNKCO_FEISHU_WEBHOOK }}
+        LYNKCO_DINGTALK_WEBHOOK: ${{ secrets.LYNKCO_DINGTALK_WEBHOOK }}
+        LYNKCO_WECOM_WEBHOOK: ${{ secrets.LYNKCO_WECOM_WEBHOOK }}
         # App 共用签名密钥集合（JSON 字符串，详见 lynkco_common.py），必须配置，
         # 否则脚本会在计算签名时报错退出。字段名与 env.json 的 secrets 段一致：
         # {"nativeAppKey":"","nativeAppSecret":"","nativeAppCode":"",

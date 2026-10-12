@@ -18,7 +18,7 @@ from lynkco_ai import CommentGenerationError, generate_comment, load_ai_config
 from lynkco_common import env_value
 from lynkco_comment_client import CommentClient, CommentPostError, CommentPostUncertain
 from lynkco_comment_feed import eligible_posts, fetch_article_detail, fetch_recent_posts
-from lynkco_notify import send_bark_notification
+from lynkco_notify import send_notifications
 from lynkco_share import article_share_url
 
 
@@ -193,7 +193,7 @@ def _notify_generated(post, comment, status, result):
     url = _article_url(post)
     article_title = post.get("title") or "领克动态"
     try:
-        send_bark_notification(
+        send_notifications(
             title=f"领克动态评论｜{status}",
             markdown_body=(f"**动态**：{article_title}\n\n"
                            f"**评论**：{comment}\n\n"
@@ -201,8 +201,8 @@ def _notify_generated(post, comment, status, result):
             group="LynkCo评论", icon=_bark_icon(), open_url=url,
         )
     except Exception as exc:
-        result["bark_failed"] = True
-        _log(f"Bark 推送失败 id={post.get('id')} error={type(exc).__name__}: {exc}")
+        result["notify_failed"] = True
+        _log(f"通知推送失败 id={post.get('id')} error={type(exc).__name__}: {exc}")
 
 
 def _run_comment_task_unlocked(max_comments: int, dry_run: bool, state_path: Path,
@@ -348,11 +348,11 @@ def _run_comment_task_unlocked(max_comments: int, dry_run: bool, state_path: Pat
         try:
             # 各条目的详情链接只在正文里出现一次，不再传 open_url
             #（首条链接会与正文里的 - 详情行重复）
-            send_bark_notification(title="本轮未生成评论", markdown_body=_summary(result),
-                                    group="LynkCo评论", icon=_bark_icon())
+            send_notifications(title="本轮未生成评论", markdown_body=_summary(result),
+                               group="LynkCo评论", icon=_bark_icon())
         except Exception as exc:
-            result["bark_failed"] = True
-            _log(f"本轮汇总 Bark 推送失败 error={type(exc).__name__}: {exc}")
+            result["notify_failed"] = True
+            _log(f"本轮汇总通知推送失败 error={type(exc).__name__}: {exc}")
     _log(
         f"任务结束：attempted={attempted} generated={result['generated']} "
         f"confirmed={result['confirmed']} skipped={result['skipped']} "
@@ -464,13 +464,13 @@ def main(argv=None):
             # exposing any credential value in the preflight diagnostic.
             error_category = str(exc) or error_category
         try:
-            send_bark_notification(
+            send_notifications(
                 title="领克动态评论", group="LynkCo评论",
                 markdown_body=f"### 评论任务 · {'发布' if args.publish else '演练'}\n- 预检失败：{error_category}\n- 未执行评论发布",
                 icon=_bark_icon(),
             )
         except Exception as bark_error:
-            _log(f"预检失败后的 Bark 推送失败 error={type(bark_error).__name__}: {bark_error}")
+            _log(f"预检失败后的通知推送失败 error={type(bark_error).__name__}: {bark_error}")
         _log(f"任务预检失败 category={error_category} detail={exc}")
         parser.exit(2, f"评论任务预检失败：{error_category}；请核查状态后重试\n")
     print(json.dumps(result, ensure_ascii=False))

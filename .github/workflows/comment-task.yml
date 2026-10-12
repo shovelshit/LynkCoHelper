@@ -84,6 +84,9 @@ jobs:
           GLM_API_KEY: ${{ secrets.GLM_API_KEY }}
           GLM_MODEL: ${{ vars.GLM_MODEL || 'glm-4v-flash' }}
           LYNKCO_BARK_KEY: ${{ secrets.LYNKCO_BARK_KEY }}
+          LYNKCO_FEISHU_WEBHOOK: ${{ secrets.LYNKCO_FEISHU_WEBHOOK }}
+          LYNKCO_DINGTALK_WEBHOOK: ${{ secrets.LYNKCO_DINGTALK_WEBHOOK }}
+          LYNKCO_WECOM_WEBHOOK: ${{ secrets.LYNKCO_WECOM_WEBHOOK }}
           LYNKCO_BARK_ICON: ${{ secrets.LYNKCO_BARK_ICON }}
           LYNKCO_COMMENT_MAX_PER_RUN: ${{ vars.LYNKCO_COMMENT_MAX_PER_RUN || '1' }}
           LYNKCO_COMMENT_MAX_AGE_HOURS: ${{ vars.LYNKCO_COMMENT_MAX_AGE_HOURS || '48' }}
