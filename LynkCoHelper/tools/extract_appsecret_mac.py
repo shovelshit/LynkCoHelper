@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-extract_appsecret.py —— macOS 版：一键自动提取领克 App 的 nativeAppKey /
+extract_appsecret_mac.py —— macOS 版：一键自动提取领克 App 的 nativeAppKey /
 nativeAppSecret（平台共享核心见 appsecret_core.py）。
 
 原理：
@@ -10,15 +10,15 @@ nativeAppSecret（平台共享核心见 appsecret_core.py）。
   双向转发给 jdb 下断点提取。
 
 用法（在仓库根目录执行；脚本已置可执行位，两种调用等价）：
-  ./LynkCoHelper/tools/extract_appsecret.py             # 无设备时自动冷启动 AVD
-  python3 LynkCoHelper/tools/extract_appsecret.py <AVD名字>  # 指定要冷启动的 AVD
+  ./LynkCoHelper/tools/extract_appsecret_mac.py             # 无设备时自动冷启动 AVD
+  python3 LynkCoHelper/tools/extract_appsecret_mac.py <AVD名字>  # 指定要冷启动的 AVD
 
 macOS 自动化内容（核心流程与全自动版共用 appsecret_core.py）：
   1. pexpect 缺失 -> 自动 pip 安装
   2. adb (platform-tools ~10MB) / jdb (Corretto 8 ~110MB) 缺失 ->
      确认后自动下载官方公开源包到 ~/.lynkco-helper-tools/（无需许可协议）
   3. 无在线设备时自动冷启动 AVD（-no-snapshot-load，规避快照导致的握手挂死）
-  4. 设备未装领克 App 时自动从领克官方 CDN 下载最新版 APK（约 285MB）并安装
+  4. 检查设备 App 版本，固定使用 v4.2.9 Release APK（约 285MB）
   5. 代理抢握手 -> jdb 断点单步 -> 提取 b/c 字段
   6. 提取成功后交互确认，可自动写入 env.json 的 secrets 段
   7. 连接中断（App 反调试自杀/平台不稳）或提取值格式异常时自动重试，最多 3 次
@@ -26,7 +26,7 @@ macOS 自动化内容（核心流程与全自动版共用 appsecret_core.py）�
 注意：密钥不应写入代码仓库（env.json 已被 gitignore）。
 平台限制：仅模拟器/AVD 在 macOS 上需一次性手动创建（Android Studio 图形
 界面三步更可靠，见文档 7.1 节）；CI/无本地环境的全自动版（含模拟器
-镜像下载）见 tools/extract_appsecret_auto.py。
+镜像下载）见 tools/extract_appsecret_github_action.py。
 """
 import os
 import platform
@@ -92,7 +92,7 @@ def ensure_device(wanted_avd=None):
                  "Android Studio -> Device Manager 创建（系统镜像选 Google APIs，"
                  "勿选 Google Play），步骤见文档 7.1 节。本脚本不自动下载它"
                  "（emulator + 系统镜像约 1.5GB 且需接受许可协议，手动装一次"
-                 "更可靠）。CI/无本地环境的全自动版本见 extract_appsecret_auto.py。")
+                 "更可靠）。CI/无本地环境版本见 extract_appsecret_github_action.py。")
     avds = core.sh([emu, "-list-avds"]).split()
     if not avds:
         sys.exit("[!] 无在线设备，也未找到任何 AVD。请先在 Android Studio 创建模拟器"
@@ -118,7 +118,7 @@ def ensure_device(wanted_avd=None):
 def main():
     if sys.platform != "darwin":
         sys.exit(f"[!] 本脚本是 macOS 本地版（当前平台: {sys.platform}）。\n"
-                 "    CI/无本地环境请用: LynkCoHelper/tools/extract_appsecret_auto.py")
+                 "    CI/无本地环境请用: LynkCoHelper/tools/extract_appsecret_github_action.py")
     core.ensure_pexpect()
     core.setup(ensure_adb(), ensure_jdb())
     print(f"[*] adb: {core.ADB}")

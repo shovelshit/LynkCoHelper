@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """一键本地提取 nativeAppKey / nativeAppSecret（x86_64 镜像 + KVM 路线）。
 
-与 extract_appsecret_auto.py 的区别：
-  - auto 版是为 CI（GitHub Actions runner）设计的全自动下载+提取；
+与 extract_appsecret_github_action.py 的区别：
+  - GitHub Action 版负责选择 APK、自动下载及提取；
   - 本版面向"本地已配好 WSL2/Ubuntu 环境的一键复跑"：
       1) 已有在线模拟器直接复用，否则冷启动 x86_64 AVD（约 2~5 分钟）；
-      2) App 未安装时优先用 TOOLS_DIR 里已下载的本地 APK，缺失才走官方
-         接口下载；
+      2) 检查 App 版本，固定从 Release 获取或复用 v4.2.9 APK；
       3) 提取主流程不走 auto 版的多线程代理（其在本地环境有竞态问题），
          而是 jdb 直连：am start -D 挂起启动 → 等 JDWP 注册 → 新端口
          forward → jdb attach（显式 127.0.0.1，见下"IPv6 坑"）→ 设
@@ -34,8 +33,8 @@
 nohup 只挡 SIGHUP 挡不住它，后台跑必须 `setsid nohup ... &`。
 
 用法：
-  python3 LynkCoHelper/tools/extract_appsecret_x86_local.py            # 默认 AVD
-  python3 LynkCoHelper/tools/extract_appsecret_x86_local.py <AVD名>    # 指定 AVD
+  python3 LynkCoHelper/tools/extract_appsecret_ubuntu.py            # 默认 AVD
+  python3 LynkCoHelper/tools/extract_appsecret_ubuntu.py <AVD名>    # 指定 AVD
   LYNKCO_AUTO_WRITE=0 ...   # 提取成功后交互确认再写 env.json
 """
 import argparse
@@ -75,7 +74,7 @@ def main():
     core.ensure_pexpect()
     # 环境自举：adb/jdb 缺失时自动下载（复用 auto 脚本的 ensure 系列）
     os.environ.setdefault("LYNKCO_IMAGE_ABI", "x86_64")
-    import extract_appsecret_auto as boot
+    import extract_appsecret_github_action as boot
     adb_path = boot.ensure_adb() or core.find_adb()
     jdb_path = boot.ensure_jdb() or core.find_jdb()
     if not adb_path or not jdb_path:
@@ -123,23 +122,14 @@ def main():
                 serial[0] = parts[0]
                 break
 
-    # ---------- 2. 领克 App 已安装？没有则装 ----------
-    if PKG not in adb("shell", "pm", "list", "packages"):
-        print("[*] 领克 App 未安装，尝试本地 APK ...")
-        apks = sorted(glob.glob(os.path.join(core.TOOLS_DIR,
-                                             "lynkco-v*.apk")))
-        apk = apks[-1] if apks else None
-        if apk:
-            print(f"[*] 使用本地包 {os.path.basename(apk)}")
-        else:
-            apk = core.ensure_apk()   # 本地没有则走官方接口下载最新版
-        print(adb("install", "-r", "-g", apk, t=600).strip())
-
-    # 密钥常量类由 core 自动定位（首跑拉 APK 扫描，同版本后续走缓存）。
-    # adb 原生识别 ANDROID_SERIAL，多设备下 core.adb 也能定位到目标设备
+    # ---------- 2. 固定 v4.2.9，已安装其它版本也必须降级 ----------
+    # adb 原生识别 ANDROID_SERIAL，多设备下 core.adb 也能定位目标设备。
     if serial[0]:
         os.environ["ANDROID_SERIAL"] = serial[0]
-    CLASS = core.get_candidates()[0]
+    core.ensure_apk()
+
+    # 密钥常量类由 core 自动定位（首跑拉 APK 扫描，同版本后续走缓存）。
+    CLASS = core.get_single_candidate()
 
     # ---------- 3. 提取主循环 ----------
     for attempt in range(1, core.MAX_ATTEMPTS + 1):

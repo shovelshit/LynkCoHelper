@@ -2,12 +2,12 @@
 """
 appsecret_core.py —— AppSecret 提取的平台无关共享核心（非入口，勿直接运行）。
 
-包含两个平台入口（macOS 本地: extract_appsecret.py / CI·全自动:
-extract_appsecret_auto.py）共用的全部逻辑：
+供 macOS、Ubuntu、Windows 本地入口以及 GitHub Action 的旧版 JDWP
+分支共用的逻辑：
   - 常量与目标信息（App/Activity/断点类/端口/env.json 路径）
   - 工具探测（find_adb / find_jdb / find_emulator，平台感知）
   - 下载工具（_download / _try_download / _confirm_download）
-  - 领克 App 自动下载安装（ensure_apk，官方 CDN）
+  - 旧版领克 App v4.2.9 自动下载安装（ensure_apk，Release）
   - 冷启动 AVD 并等待 boot_completed（按平台自动选窗口/无头模式）
   - 本地 TCP 代理（抢先完成 JDWP 握手后双向转发，原理见文档 4.5 节）
   - jdb 交互（send_cmd 回显锚点 + 静默等待同步策略）
@@ -70,7 +70,7 @@ TOOLS_DIR = os.path.expanduser("~/.lynkco-helper-tools")
 MAX_ATTEMPTS = 3
 
 # 全系统 TCG 环境（Linux x86_64 宿主跑 arm64-v8a 镜像，见
-# extract_appsecret_auto.py）：qemu 逐条翻译 ARM 指令，VM 每步执行慢一两个
+# extract_appsecret_github_action.py）：qemu 逐条翻译 ARM 指令，VM 每步执行慢一两个
 # 数量级，所有与设备/VM 交互的等待窗口按平台放大
 SLOW_VM = sys.platform == "linux"
 
@@ -79,8 +79,12 @@ def _vt(base):
     """按平台放大超时：TCG 全系统模拟 10 倍，macOS HVF 原生 1 倍。"""
     return base * 10 if SLOW_VM else base
 
-# 领克官方最新版本号查询接口（App 自动下载安装用，见 ensure_apk）
+# 官方版本接口供独立的 fetch_latest_apk.py 使用；JDWP 入口固定 4.2.9。
 LYNKCO_VER_API = "https://app-api-gw-toc.lynkco.com/app/newest/info"
+LEGACY_APK_VERSION = "4.2.9"
+LEGACY_APK_URL = ("https://github.com/shovelshit/LynkCoHelper/releases/"
+                  "download/apk-v4.2.9/lynkco-v4.2.9.apk")
+LEGACY_APK_SHA256 = "62f87947a43090620fb96d058a5092a037093f1a57cfc37966a2bea4f3ab53c3"
 
 # 各入口探测完成后调用 setup() 注入，core 内的 adb()/run_once() 使用
 ADB = None
@@ -329,47 +333,52 @@ def _app_installed(tries=6, wait=5):
     sys.exit("[!] adb 持续无法查询设备（见上方错误），请检查 adb devices 后重试")
 
 
-def ensure_apk():
-    """设备未装领克 App 时自动安装（平台无关）：查询官方接口拿最新
-    版本号，从领克官方 CDN 下载（约 285MB，已下载则复用）后 adb install。
-    GitHub Actions 模式优先用 fetch-lynkco-apk workflow 上传到 Release
-    的稳定资产（仅 CI 启用；本地平台保持官方 CDN 直下）。"""
-    if _app_installed():
-        return
-    apk = None
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        # 写死上游仓库：fork 无 Release（fork 不复制 Release），动态拼
-        # GITHUB_REPOSITORY 在 fork 上必然 404；失败仍有官方 CDN 兜底
-        rel_url = ("https://github.com/shovelshit/LynkCoHelper/releases/download/"
-                   "apk-latest/lynkco-latest.apk")
-        dest = os.path.join(TOOLS_DIR, "lynkco-latest.apk")
-        print("[*] 尝试从仓库 Release 拉取 APK ...")
-        if _try_download(rel_url, dest, 285):
-            apk = dest
-    if apk is None:
-        try:
-            data = json.loads(urllib.request.urlopen(LYNKCO_VER_API,
-                                                     timeout=15).read())
-            ver = (data.get("data") or {}).get(
-                "androidNewestVersion", "").lstrip("V")
-        except Exception:
-            ver = ""
-        if not ver:
-            sys.exit(f"[!] 设备上未安装 {APP} 且无法查询最新版本号，"
-                     "请手动安装后重试")
-        apk = os.path.join(TOOLS_DIR, f"lynkco-v{ver}.apk")
-        if not os.path.exists(apk):
-            if not _confirm_download(f"领克 App v{ver} APK", 285, apk):
-                sys.exit("[!] 未安装 App 且跳过下载，退出。")
-            os.makedirs(TOOLS_DIR, exist_ok=True)
-            _download(f"https://app-cdn.lynkco.com/android/"
-                      f"lynkco-64-v{ver}.apk", apk, 285)
+def _legacy_apk_valid(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest() == LEGACY_APK_SHA256
+
+
+def ensure_legacy_apk():
+    """固定获取已验证的 4.2.9 Release APK，不使用会变动的 latest。"""
+    apk = os.path.join(TOOLS_DIR, f"lynkco-v{LEGACY_APK_VERSION}.apk")
+    if os.path.isfile(apk) and _legacy_apk_valid(apk):
+        return apk
+    if not _confirm_download("领克 App v4.2.9 APK", 285, apk):
+        sys.exit("[!] 跳过旧版 APK 下载，退出。")
+    staging = apk + ".download"
+    _download(LEGACY_APK_URL, staging, 285)
+    if not _legacy_apk_valid(staging):
+        os.remove(staging)
+        sys.exit("[!] v4.2.9 Release APK 校验失败；拒绝安装。")
+    os.replace(staging, apk)
+    return apk
+
+
+def _installed_app_version():
+    output = adb("shell", "dumpsys", "package", APP)
+    match = re.search(r"(?m)^\s*versionName=([^\s]+)", output)
+    return match.group(1) if match else None
+
+
+def ensure_apk(selected_apk=None):
+    """旧版 JDWP 默认固定 4.2.9；显式指定 APK 则安装该文件。"""
+    if selected_apk is None and _app_installed() and \
+            _installed_app_version() == LEGACY_APK_VERSION:
+        print("[*] 已安装领克 App v4.2.9，复用现有安装")
+        return None
+    apk = selected_apk or ensure_legacy_apk()
     print(f"[*] 安装 APK: {apk}")
-    r = subprocess.run([ADB, "install", "-r", apk], capture_output=True, text=True)
+    r = subprocess.run([ADB, "install", "-r", "-d", apk],
+                       capture_output=True, text=True)
     out = "\n".join(p for p in (r.stdout.strip(), r.stderr.strip()) if p)
     if out:
         print("    " + out.replace("\n", "\n    "))
-    if not _app_installed():
+    if r.returncode != 0 or not _app_installed() or \
+            (selected_apk is None and _installed_app_version() != LEGACY_APK_VERSION):
         # 安装失败诊断：adb 把安装失败原因（如 Failure
         # [INSTALL_FAILED_NO_MATCHING_ABIS]）打到 stderr，且 x86_64 镜像
         # 是否带 ARM 翻译层直接决定 arm64-only APK 能否装上
@@ -399,7 +408,9 @@ def ensure_apk():
                 print(f"[diag] {simg} sha256: {h.hexdigest()}")
             except OSError as e:
                 print(f"[diag] {simg}: {e}")
-        sys.exit(f"[!] APK 安装后仍未检测到 {APP}，请人工检查")
+        sys.exit(f"[!] APK 安装失败或版本不是期望的 {LEGACY_APK_VERSION}；"
+                 "不会清除现有 App 数据，请检查上方 adb 输出")
+    return apk
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +734,12 @@ def looks_valid(v):
     return bool(v) and VALUE_RE.fullmatch(v) is not None
 
 
+def is_key_pair(key, secret):
+    """Validate both values together before accepting an ambiguous class."""
+    return bool(key and re.fullmatch(r"[0-9]{9}", key)
+                and secret and re.fullmatch(r"[0-9A-Za-z]{32}", secret))
+
+
 def _in_ci():
     """是否运行在 GitHub Actions（公开日志，需要脱敏）。"""
     return os.environ.get("GITHUB_ACTIONS") == "true"
@@ -800,7 +817,7 @@ def _dump_device_diagnostics(tag):
     print(f"[*] 设备侧诊断（{tag}）：")
     try:
         alive = adb("shell", "pidof", APP).strip()
-        print(f"    App 进程: {alive or '已退出（启动即崩溃的典型特征）'}")
+        print(f"    App 进程: {alive or '已退出'}")
     except Exception:
         pass
     try:
@@ -817,9 +834,53 @@ def _dump_device_diagnostics(tag):
             print("    logcat 崩溃缓冲为空（进程非崩溃退出，或未被拉起）")
     except Exception:
         pass
+    try:
+        recent = adb("shell", "logcat", "-d", "-b", "main", "-t", "2000")
+        keyvault_lines = [ln for ln in recent.splitlines()
+                          if "com.geely.sweet.lib.keyvault.KeyVaultException" in ln
+                          or "ERR_ENV_BLOCKED=-4" in ln]
+        if keyvault_lines:
+            markers = []
+            if any("com.geely.sweet.lib.keyvault.KeyVaultException" in ln
+                   for ln in keyvault_lines):
+                markers.append("KeyVaultException")
+            if any("ERR_ENV_BLOCKED=-4" in ln for ln in keyvault_lines):
+                markers.append("ERR_ENV_BLOCKED=-4")
+            env = next((m.group(0) for ln in keyvault_lines
+                        for m in [re.search(r"\benv=0x[0-9a-fA-F]+\b", ln)] if m), None)
+            if env:
+                markers.append(env)
+            print("    近期 main logcat（未关联当前 PID）：" + ", ".join(markers))
+    except Exception:
+        pass
+
+
+def set_candidate_breakpoints(child, candidates):
+    """Wait for each jdb prompt without relying on unreliable PTY command echo."""
+    for cls in candidates:
+        try:
+            child.sendline(f"stop in {cls}.<clinit>")
+            idx = child.expect(PROMPTS + [pexpect.EOF, pexpect.TIMEOUT],
+                               timeout=_vt(15))
+        except (pexpect.EOF, OSError) as e:
+            raise Disconnected("设置断点时 jdb 已退出") from e
+        if idx == len(PROMPTS):
+            raise Disconnected("设置断点时 jdb 已退出（EOF）")
+        if idx == len(PROMPTS) + 1:
+            raise Disconnected("设置断点时等待 jdb 提示符超时")
+
+
+def probe_key_pair(child, cls):
+    """Reject a candidate unless both fields have the expected key shapes."""
+    key = parse_field(send_cmd(child, f"print {cls}.b", timeout=_vt(10)))
+    secret = parse_field(send_cmd(child, f"print {cls}.c", timeout=_vt(10)))
+    return (key, secret) if is_key_pair(key, secret) else (None, None)
+
 
 def run_once():
     """单次完整提取；连接类故障抛 Disconnected 交由主循环重试。返回 (key, secret)。"""
+    # APK I/O must finish before the app is paused in its early JDWP window.
+    candidates = get_candidates()
     proxy = Proxy()
     threading.Thread(target=proxy.start_and_serve, daemon=True).start()
     time.sleep(0.3)  # 等代理开始监听
@@ -918,11 +979,7 @@ def run_once():
         send_cmd(child, "suspend", timeout=_vt(10))
 
         print("\n[*] Setting breakpoint ...")
-        # 候选类的 <clinit> 全部挂延迟断点（对未加载的类不报错、仅挂起），
-        # 哪个命中用哪个：优先 APK 自动定位，兑底硬编码候选
-        candidates = get_candidates()
-        for cls in candidates:
-            send_cmd(child, f"stop in {cls}.<clinit>", timeout=_vt(15))
+        set_candidate_breakpoints(child, candidates)
 
         print("\n[*] resume")
         try:
@@ -931,64 +988,48 @@ def run_once():
             raise Disconnected(f"jdb 进程已退出（{e}）")
         # resume 后断点事件（"设置延迟的断点/断点命中"）会异步到达，这里
         # 不能用 send_cmd（其静默等待可能提前吞掉断点事件），直接等断点文本。
-        idx = child.expect(BREAKPOINT_PATTERNS + [pexpect.EOF, pexpect.TIMEOUT],
-                           timeout=_vt(90))
-        if idx == len(BREAKPOINT_PATTERNS):
-            raise Disconnected("等待断点期间 jdb 已退出（EOF）")
-        hit_cls = None
-        if idx < len(BREAKPOINT_PATTERNS):
+        deadline = time.monotonic() + _vt(90)
+        seen = set()
+        while True:
+            idx = child.expect(BREAKPOINT_PATTERNS + [pexpect.EOF, pexpect.TIMEOUT],
+                               timeout=max(1, deadline - time.monotonic()))
+            if idx == len(BREAKPOINT_PATTERNS):
+                _dump_device_diagnostics("等待断点期间 jdb 已退出")
+                raise Disconnected("等待断点期间 jdb 已退出（EOF）")
+            if idx == len(BREAKPOINT_PATTERNS) + 1:
+                print("\n[!] 未命中更多断点；挂起后校验已加载的候选类 ...")
+                send_cmd(child, "suspend", timeout=_vt(10))
+                for cls in candidates:
+                    key, secret = probe_key_pair(child, cls)
+                    if is_key_pair(key, secret):
+                        print(f"[+] 通过字段形态验证: {cls}")
+                        return key, secret
+                return None, None
+
             print("\n[+] Breakpoint hit!")
             time.sleep(0.2)
-            seg = ""
             try:
                 child.expect(PROMPTS + [pexpect.TIMEOUT], timeout=5)
-                seg = child.before or ""
-            except Exception:
-                pass
-            # 断点输出形如："线程=main", com.safe.cons.LynkCoConstants$f.<clinit>(),
-            # 行=1 bci=7——从命中输出解析实际命中的候选类
+            except pexpect.EOF as e:
+                raise Disconnected("读取断点详情时 jdb 已退出（EOF）") from e
+            seg = child.before or ""
             m = re.search(r"com\.safe\.cons\.LynkCoConstants\$\w+", seg)
-            if m and m.group(0) in candidates:
-                hit_cls = m.group(0)
-                print(f"[*] 命中密钥常量类: {hit_cls}")
-            else:
-                # 输出里没解析到类名时退回首选候选（同旧行为）
-                hit_cls = candidates[0]
-            for i in range(15):
-                print(f"\n[*] next (step {i + 1})")
-                send_cmd(child, "next", timeout=_vt(15))
-                out = send_cmd(child, f"print {hit_cls}.c", timeout=_vt(10))
-                val = parse_field(out)
-                print(f"    -> c probe: "
-                      f"{'有值（' + str(len(val)) + ' 位）' if val else 'None'}")
-                if val:
-                    break
-        else:
-            print("\n[!] 未命中断点（clinit 可能已提前执行），直接尝试打印字段 ...")
-
-        if hit_cls is None:
-            # 未命中断点时逐一候选探测字段，谁有值用谁
-            hit_cls = candidates[0]
-            for cls in candidates:
-                probe = send_cmd(child, f"print {cls}.c", timeout=_vt(10))
-                if parse_field(probe):
-                    hit_cls = cls
-                    break
-
-        print(f"\n[*] Dumping fields b/c/d/e of {hit_cls} ...")
-        results = {}
-        for field in ["b", "c", "d", "e"]:
-            results[field] = send_cmd(child, f"print {hit_cls}.{field}",
-                                      timeout=_vt(10))
-
-        print("\n" + "=" * 60)
-        print("[RESULT]" + ("（CI 日志：值已脱敏）" if _in_ci() else ""))
-        for field, out in results.items():
-            print(f"--- {field} raw output ---")
-            print(scrub_jdb(out))
-        print("=" * 60)
-
-        return parse_field(results.get("b", "")), parse_field(results.get("c", ""))
+            hit_cls = m.group(0) if m and m.group(0) in candidates else None
+            if not hit_cls:
+                print("[!] 无法识别命中的候选类，继续等待")
+            elif hit_cls not in seen:
+                seen.add(hit_cls)
+                print(f"[*] 校验候选类: {hit_cls}")
+                for i in range(15):
+                    send_cmd(child, "next", timeout=_vt(15))
+                    key, secret = probe_key_pair(child, hit_cls)
+                    if is_key_pair(key, secret):
+                        print(f"[+] 通过字段形态验证: {hit_cls}")
+                        return key, secret
+                print(f"[*] {hit_cls} 未得到有效 b/c，继续等待")
+            if time.monotonic() >= deadline:
+                return None, None
+            child.sendline("resume")
     finally:
         print("\n[*] Killing local jdb with SIGKILL (NOT quit) ...")
         if child is not None:
@@ -1004,19 +1045,14 @@ def run_once():
 
 
 def _scan_apk_for_key_classes(apk_path):
-    """扫描 APK 内 classes.dex 的明文字符串区，定位业务 dex 孤立引用的
-    密钥常量类（LynkCoConstants$X）。
+    """Locate isolated references, or enumerate the packed payload's class list.
 
-    加固壳把真实 dex 的字符串表明文存于 classes.dex 尾部 payload：定义区
-    里全部内部类名连续出现（相邻匹配间距约 35B）；而业务 dex 只会孤立
-    引用密钥类一处（相邻无同模式匹配）。后续版本内部类名再偏移也能自动
-    跟踪，无需改代码。"""
+    Recent APKs omit the isolated reference. A contiguous definition list is
+    only a set of runtime candidates, not evidence identifying the key class.
+    """
     import zipfile
-    try:
-        with zipfile.ZipFile(apk_path) as z:
-            data = z.read("classes.dex")
-    except Exception:
-        return []
+    with zipfile.ZipFile(apk_path) as z:
+        data = z.read("classes.dex")
     # 仅匹配小写字母开头的短混淆名（$a~$zz）；ModuleEvent/WeexUrl 等带
     # 大写开头的具名内部类在业务 dex 中与密钥类相邻出现，必须排除，否则
     # 会破坏孤立性判定
@@ -1030,7 +1066,18 @@ def _scan_apk_for_key_classes(apk_path):
         # 的才是业务 dex 的引用点
         if off - prev_off > 1000 and next_off - off > 1000 and name not in found:
             found.append(name)
-    return [f"com.safe.cons.LynkCoConstants${n}" for n in found]
+    if found:
+        names = found
+    else:
+        groups = []
+        for off, name in hits:
+            if not groups or off - groups[-1][-1][0] >= 200:
+                groups.append([])
+            groups[-1].append((off, name))
+        groups = [group for group in groups if len(group) >= 2]
+        # Multiple unrelated definition runs cannot safely identify a candidate set.
+        names = [name for _, name in groups[0]] if len(groups) == 1 else []
+    return [f"com.safe.cons.LynkCoConstants${n}" for n in dict.fromkeys(names)]
 
 
 def auto_detect_candidates():
@@ -1056,18 +1103,28 @@ def auto_detect_candidates():
         r = subprocess.run([ADB, "pull", base, dest],
                            capture_output=True, text=True)
         if r.returncode != 0 or not os.path.exists(dest):
+            print(f"[!] APK 拉取失败（adb exit={r.returncode}）："
+                  f"{r.stderr.strip() or '输出文件不存在'}")
             return []
-        cands = _scan_apk_for_key_classes(dest)
         try:
-            os.remove(dest)
-        except OSError:
-            pass
+            try:
+                cands = _scan_apk_for_key_classes(dest)
+            except (OSError, zipfile.BadZipFile, KeyError) as e:
+                print(f"[!] APK 读取/扫描失败：{e}")
+                return []
+        finally:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+        if not cands:
+            print("[!] APK 扫描未找到可验证的候选类；payload 结构可能已变化")
         if cands:
             with open(cache, "w") as f:
                 f.write("\n".join(cands) + "\n")
         return cands
     except Exception as e:
-        print(f"[.] APK 自动定位未成功（退回内置候选）：{e}")
+        print(f"[!] APK 自动定位失败：{e}")
         return []
 
 
@@ -1085,8 +1142,17 @@ def get_candidates():
         sys.exit("[!] 未能从 APK 自动定位密钥常量类（设备拉取/扫描失败）。"
                  "请检查 adb 连接后重跑；若壳的 payload 结构变化，"
                  "需重新静态分析扫描规则。")
-    print(f"[*] APK 扫描定位密钥常量类：{', '.join(auto)}")
+    print(f"[*] APK 扫描得到候选类（需运行时验证 b/c）：{', '.join(auto)}")
     return auto
+
+
+def get_single_candidate():
+    """Legacy entry points cannot safely select the first of several classes."""
+    candidates = get_candidates()
+    if len(candidates) != 1:
+        raise Disconnected("APK 有多个候选密钥类；当前入口无法验证 b/c 字段，"
+                           "请使用支持运行时校验的 macOS 提取入口")
+    return candidates[0]
 
 
 def extract_main_loop():
@@ -1122,4 +1188,7 @@ def extract_main_loop():
               "不稳，请冷启动模拟器后重跑")
         print("    2. 反复未命中断点/字段为空 → App 可能更新了混淆类名，"
               "需重新静态分析定位新的调用路径")
+        print("    3. 若近期日志出现 KeyVault ERR_ENV_BLOCKED=-4 → App 的原生"
+              "环境检查拒绝当前设备/模拟器；更换受支持环境后再验证，"
+              "不能据此推断 b/c 字段已移除")
         sys.exit(1)

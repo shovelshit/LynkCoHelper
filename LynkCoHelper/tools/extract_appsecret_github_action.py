@@ -1,60 +1,22 @@
 #!/usr/bin/env python3
+"""Extract nativeAppKey/nativeAppSecret from a selected LynkCo APK.
+
+The known 4.3.x KeyVault layout is read statically. APKs without KeyVault use
+the existing emulator/JDWP flow. CI writes env.json and then hands it off via
+the workflow's existing one-time link; never commit env.json to the repository.
 """
-extract_appsecret_auto.py —— 全自动版（CI / 无本地 Android 环境的机器）：
-从零自动提取领克 App 的 nativeAppKey / nativeAppSecret。
-
-支持平台（默认镜像 ABI 为 arm64-v8a——领克 APK 仅含 arm64 原生库）：
-  - macOS Apple Silicon：Hypervisor.framework 原生虚拟化，快；本地
-    全自动首选。
-  - Linux x86_64（含 GitHub Actions ubuntu runner）：qemu 全系统 TCG
-    模拟——x64 emulator 包自带 qemu-system-aarch64，逐条翻译 ARM
-    指令，整个 guest 就是 arm64 Android，App 的加固壳跑真 ARM64 代码，
-    无 libndk 翻译层、不会崩溃；代价是慢（冷启动 20~50 分钟）。
-
-已排除的路线（2026-08-31 实测，勿再踩）：
-  - ubuntu + x86_64 镜像：App 的 arm64 库经 libndk 翻译执行，加固壳必崩
-  - macOS runner（VM 内）：无 Hypervisor.framework，而 Android emulator
-    的 arm64 guest 在 macOS 上死绑 HVF（-accel off 无效、-qemu 直通
-    -accel tcg 即 fatal），且预装 darwin-x86_64 包不含 qemu-system-aarch64
-
-用法（在仓库根目录执行；脚本已置可执行位，两种调用等价）：
-  ./LynkCoHelper/tools/extract_appsecret_auto.py            # 全自动
-  python3 LynkCoHelper/tools/extract_appsecret_auto.py <AVD名字>  # 指定 AVD
-
-全自动内容（核心流程与 macOS 版共用 appsecret_core.py）：
-  1. 前置环境自动探测与下载（存 ~/.lynkco-helper-tools/，二次运行复用）：
-     - pexpect 缺失 -> 自动 pip 安装
-     - adb / jdb 缺失 -> 多镜像源自动下载官方公开源包
-     - emulator：本地已有的（带 qemu-system-aarch64）直接用；否则自下载
-       （macos runner 预装的 darwin-x86_64 包不含 arm64 qemu，不能用）
-     - arm64-v8a API34 Google APIs 系统镜像缺失 -> 下载（约 1.2GB）、
-       手工创建 AVD（无需 cmdline-tools）
-     - 硬件加速预检：macOS 查 Hypervisor.framework（缺失直接失败并指路
-       Linux 路线——mac 上 arm64 guest 无法降级 TCG）；Linux 无需 KVM
-       （arm64 镜像走 qemu TCG 全系统模拟）
-  2. 无在线设备时自动冷启动 AVD（-no-snapshot-load，规避快照导致的握手
-     挂死；设 EMU_HEADLESS=1 或无 DISPLAY 时自动切无头模式，适配 CI）
-  3. 设备未装领克 App 时 -> 从领克官方 CDN 下载最新版 APK（约 285MB）
-     自动安装（与 macOS 版共用 core.ensure_apk）
-  4. 代理抢握手 -> jdb 断点单步 -> 提取 b/c 字段
-  5. 提取成功后交互确认，可自动写入 env.json 的 secrets 段
-     （CI 场景设 LYNKCO_AUTO_WRITE=1 免确认，env.json 缺失时自动创建）
-  6. 连接中断（App 反调试自杀/平台不稳）或提取值格式异常时自动重试，
-     最多 3 次；失败时 dump 设备侧诊断（进程/ABI/logcat 崩溃缓冲）
-
-注意：密钥不应写入代码仓库（env.json 已被 gitignore）。
-本地 macOS 已有 Android Studio 环境时，交互友好的入口是
-tools/extract_appsecret.py。
-"""
+import argparse
 import glob
 import os
 import platform
 import re
+import subprocess
 import sys
 import zipfile
 import urllib.request
 
 import appsecret_core as core
+import appsecret_keyvault as keyvault
 
 # 下载镜像源：官方源优先（海外快），腾讯云镜像回退（国内快，包同步自 Google）
 _PKG_MIRRORS = [
@@ -79,8 +41,6 @@ _IS_MAC = sys.platform == "darwin"
 #     即 SIGSEGV（run 33768167646，3 次重试同型失败）
 # 故本脚本对 x86_64 镜像钉死 r09 版本，不走"取最新"逻辑。
 _ABI = os.environ.get("LYNKCO_IMAGE_ABI", "arm64-v8a")
-if _ABI not in ("arm64-v8a", "x86_64"):
-    sys.exit(f"[!] 不支持的 LYNKCO_IMAGE_ABI={_ABI}（可选 arm64-v8a / x86_64）")
 _IS_X86_IMAGE = _ABI == "x86_64"
 # 镜像 API：arm64/x86_64 均用 33。x86_64 用 API33 的 r09 修订版
 # （r10+ 已移除 arm64 翻译；API34 可装但壳 3 秒 SIGSEGV，见上）
@@ -404,9 +364,43 @@ def ensure_emulator(existing_emu=None):
     return emu, _AVD_NAME
 
 
-def ensure_apk():
-    """已收敛至共享核心（appsecret_core.ensure_apk），两平台行为一致。"""
-    core.ensure_apk()
+def ensure_apk(selected_apk=None):
+    """The legacy device flow must install the same APK selected for extraction."""
+    core.ensure_apk(selected_apk)
+
+
+def resolve_apk(args):
+    explicit = args.apk or os.environ.get("LYNKCO_APK_PATH")
+    if explicit:
+        if not os.path.isfile(explicit):
+            raise ValueError("指定的 APK 文件不存在")
+        return os.path.abspath(explicit)
+    version = args.apk_version
+    if version == "latest":
+        tag, asset = "apk-latest", "lynkco-latest.apk"
+    elif re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        tag, asset = f"apk-v{version}", f"lynkco-v{version}.apk"
+    else:
+        raise ValueError("APK 版本只能是 latest 或 X.Y.Z")
+    url = ("https://github.com/shovelshit/LynkCoHelper/releases/download/"
+           f"{tag}/{asset}")
+    destination = os.path.join(core.TOOLS_DIR, asset)
+    os.makedirs(core.TOOLS_DIR, exist_ok=True)
+    if version == "latest" or not os.path.isfile(destination):
+        staging = destination + ".download"
+        core._download(url, staging, 285)
+        os.replace(staging, destination)
+    return destination
+
+
+def prepare_kvm():
+    """Only the legacy emulator route needs host KVM permissions."""
+    if not _IS_X86_IMAGE or os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    if not os.path.exists("/dev/kvm"):
+        print("[!] runner 无 /dev/kvm，旧版模拟器可能运行缓慢")
+        return
+    subprocess.run(["sudo", "chmod", "666", "/dev/kvm"], check=True)
 
 
 def ensure_device(wanted_avd=None):
@@ -453,29 +447,57 @@ def ensure_device(wanted_avd=None):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="从指定版本 APK 提取 nativeAppSecret")
+    parser.add_argument("avd", nargs="?", help="仅旧版动态提取时使用的 AVD 名称")
+    parser.add_argument("--apk", help="本地 APK，覆盖版本选择")
+    parser.add_argument("--env", help="指定输出 env.json 路径（默认业务目录）")
+    parser.add_argument("--apk-version", default=os.environ.get("LYNKCO_APK_VERSION") or "4.3.1",
+                        help="Release 版本 X.Y.Z 或 latest（默认 4.3.1）")
+    parser.add_argument("--app-key", default=keyvault.DEFAULT_APP_KEY)
+    parser.add_argument("--app-code", default=keyvault.DEFAULT_APP_CODE)
+    args = parser.parse_args()
+    if args.env:
+        core.ENV_JSON = os.path.abspath(args.env)
+    try:
+        apk = resolve_apk(args)
+        result = keyvault.extract(apk, args.app_key, args.app_code)
+    except (ValueError, OSError) as exc:
+        sys.exit(f"[!] APK 静态提取失败：{exc}")
+    if result is not None:
+        key, secret = result
+        print(f"[+] KeyVault 静态提取成功：nativeAppKey={core.mask_secret(key) if core._in_ci() else '***'}，"
+              f"nativeAppSecret={core.mask_secret(secret) if core._in_ci() else '***'}")
+        core.maybe_write_env(key, secret)
+        return
+
+    print("[*] APK 无 KeyVault，使用旧版模拟器/JDWP 提取流程")
+    if not core._legacy_apk_valid(apk):
+        sys.exit("[!] 旧版 JDWP 提取只支持已验证的 v4.2.9 APK；"
+                 "请选择 --apk-version 4.2.9")
+    if _ABI not in ("arm64-v8a", "x86_64"):
+        sys.exit(f"[!] 不支持的 LYNKCO_IMAGE_ABI={_ABI}（可选 arm64-v8a / x86_64）")
     if _IS_MAC and platform.machine() != "arm64":
         sys.exit("[!] Intel mac 不支持：emulator 的 darwin-x86_64 包不含 "
                  "qemu-system-aarch64，跑不了 arm64 镜像。请改用 x86_64 Linux"
                  "（qemu 全系统 TCG 模拟）或 arm64 真机（adb 连接后跑本地版 "
-                 "tools/extract_appsecret.py）。")
+                 "tools/extract_appsecret_mac.py）。")
     if not _IS_MAC and platform.machine() != "x86_64":
         sys.exit("[!] Linux ARM64 无官方 emulator/platform-tools 包。请改用 "
                  "x86_64 Linux（ubuntu runner，qemu 全系统 TCG 模拟）、"
                  "Apple Silicon Mac（HVF 原生）或 arm64 真机（本地版 "
-                 "tools/extract_appsecret.py）。")
+                 "tools/extract_appsecret_mac.py）。")
     if _IS_X86_IMAGE and (_IS_MAC or platform.machine() != "x86_64"):
         sys.exit("[!] LYNKCO_IMAGE_ABI=x86_64 实验仅支持 x86_64 Linux 宿主"
                  "（x86_64 镜像 + KVM + libndk 翻译 arm64 库）。")
     if _IS_X86_IMAGE:
-        print("[*] 实验模式：x86_64 镜像 + KVM，领克 arm64 库经 libndk 翻译执行。")
-        print("    已实证：壳翻译执行约 3 秒即 SIGSEGV（run 33768167646），"
-              "本路线预期失败，仅作复现验证。")
+        print("[*] 旧版使用 API33 r09 x86_64 镜像和 KVM（arm64 库经 libndk 翻译）。")
+    prepare_kvm()
     core.ensure_pexpect()
     core.setup(ensure_adb(), ensure_jdb())
     print(f"[*] adb: {core.ADB}")
     print(f"[*] jdb: {core.JDB}")
-    ensure_device(sys.argv[1].strip() if len(sys.argv) > 1 else None)
-    ensure_apk()
+    ensure_device(args.avd)
+    ensure_apk(apk)
     core.extract_main_loop()
 
 

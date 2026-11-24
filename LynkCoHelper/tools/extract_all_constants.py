@@ -245,7 +245,7 @@ def run_dump_once(results):
         print(f"\n[*] 设延迟断点: {TARGET_CLASS}.<clinit>")
         core.send_cmd(child, f"stop in {TARGET_CLASS}.<clinit>", timeout=core._vt(15))
         # 早期哨兵断点：密钥常量类 clinit 必先命中，证明断点链路可用
-        key_cls = core.get_candidates()[0]
+        key_cls = core.get_single_candidate()
         print(f"[*] 设哨兵断点: {key_cls}.<clinit>")
         core.send_cmd(child, f"stop in {key_cls}.<clinit>", timeout=core._vt(15))
 

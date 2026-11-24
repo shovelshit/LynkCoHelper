@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Windows 编排版一键提取 nativeAppKey / nativeAppSecret。
 
-与 tools/extract_appsecret_x86_local.py（WSL 版）的分工：
+与 tools/extract_appsecret_ubuntu.py（WSL 版）的分工：
   - 模拟器仍跑在 WSL2 里（复用 WSL 侧已下载的 SDK / x86_64 镜像 / AVD，
     Windows 原生跑 Android 模拟器需另装整套 SDK + 镜像，不划算）；
   - 本脚本在 Windows 原生 Python 下运行，用 Windows 的 adb.exe 通过
@@ -24,9 +24,9 @@ Windows 侧前置（脚本自动处理，无需手动装）：
 JAVA_TOOL_OPTIONS=-Duser.language=en 强制英文输出。
 
 用法（Windows 命令行，仓库根目录下）：
-  python LynkCoHelper\\tools\\extract_appsecret_x86_local_win.py
+  python LynkCoHelper\\tools\\extract_appsecret_windows.py
 后台跑：
-  start /b python LynkCoHelper\\tools\\extract_appsecret_x86_local_win.py
+  start /b python LynkCoHelper\\tools\\extract_appsecret_windows.py
 """
 import glob
 import os
@@ -106,7 +106,7 @@ def main():
     # 密钥常量类由 core 自动定位；adb 原生识别 ANDROID_SERIAL，
     # 多设备下 core.adb 也能定位到 WSL 模拟器
     os.environ["ANDROID_SERIAL"] = DEVICE
-    CLASS = core.get_candidates()[0]
+    CLASS = core.get_single_candidate()
     for attempt in range(1, core.MAX_ATTEMPTS + 1):
         print(f"\n========== 第 {attempt}/{core.MAX_ATTEMPTS} 次尝试 ==========",
               flush=True)
@@ -277,7 +277,7 @@ def _wsl(cmd, t=30):
 
 def _ensure_wsl_ready():
     """新机器检查：WSL 发行版、WSL 侧工具链（模拟器/镜像/AVD）。
-    工具链缺失时引导一次 extract_appsecret_auto.py 完成下载与 AVD 创建。"""
+    工具链缺失时引导旧版提取入口完成下载与 AVD 创建。"""
     r = _wsl("true", t=20)
     if r.returncode != 0:
         sys.exit("[!] WSL 未就绪：请以管理员身份执行 "
@@ -289,9 +289,9 @@ def _ensure_wsl_ready():
     print("[*] WSL 侧工具链未就绪（首次一次性引导：下载 emulator + x86_64 "
           "系统镜像 + JDK8 + platform-tools + 领克 APK，约 1.5GB，"
           "视网速 10~40 分钟）...")
-    # 把 Windows 侧仓库复制进 WSL（auto 脚本在仓库内运行）
+    # 把 Windows 侧仓库复制进 WSL（引导脚本在仓库内运行）
     repo_win = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__)))))
+        os.path.abspath(__file__))))
     repo_mnt = ("/mnt/" + repo_win[0].lower() +
                 repo_win[2:].replace("\\", "/"))
     r = _wsl(f"mkdir -p ~/lynkco-helper && cp -r '{repo_mnt}/.' "
@@ -302,7 +302,8 @@ def _ensure_wsl_ready():
     subprocess.run(
         ["wsl", "-d", WSL_DISTRO, "-u", WSL_USER, "-e", "bash", "-c",
          "cd ~/lynkco-helper && LYNKCO_IMAGE_ABI=x86_64 EMU_HEADLESS=1 "
-         "python3 LynkCoHelper/tools/extract_appsecret_auto.py "
+         "python3 LynkCoHelper/tools/extract_appsecret_github_action.py "
+         "--apk-version 4.2.9 "
          f"{AVD}; echo BOOTSTRAP-EXITED"])
     print("[*] WSL 工具链引导流程结束，继续提取 ...")
 
@@ -345,20 +346,20 @@ def _ensure_device(adb):
 
 
 def _ensure_apk(adb):
-    """App 未安装时：优先用 WSL 里已下载的 APK（经 UNC 路径安装）。"""
-    PKG = core.APP
-    if PKG in adb("-s", DEVICE, "shell", "pm", "list", "packages"):
+    """固定安装或复用 v4.2.9，不使用 WSL 通配符中的较新版本。"""
+    version = adb("-s", DEVICE, "shell", "dumpsys", "package", core.APP)
+    if re.search(r"(?m)^\s*versionName=4\.2\.9\s*$", version):
+        print("[*] 已安装领克 App v4.2.9，复用现有安装")
         return
-    print("[*] 领克 App 未安装，从 WSL 侧 APK 安装 ...")
-    r = _wsl("ls ~/.lynkco-helper-tools/lynkco-v*.apk | tail -1")
-    apk_wsl = (r.stdout or "").strip()
-    if not apk_wsl:
-        sys.exit("[!] WSL 内无本地 APK，请先在 WSL 跑一次 "
-                 "extract_appsecret_auto.py 下载")
-    apk_win = "\\\\wsl.localhost\\" + WSL_DISTRO + "\\" + \
-        apk_wsl.replace("~", "/home/" + WSL_USER).lstrip("/").replace("/", "\\")
-    print("[*] 安装:", apk_win)
-    print(adb("-s", DEVICE, "install", "-r", "-g", apk_win, t=600).strip())
+    apk = core.ensure_legacy_apk()
+    print("[*] 安装:", apk)
+    output = adb("-s", DEVICE, "install", "-r", "-d", "-g", apk, t=600)
+    print(output.strip())
+    if "Success" not in output:
+        sys.exit("[!] 旧版 APK 安装失败；不会清除现有 App 数据")
+    version = adb("-s", DEVICE, "shell", "dumpsys", "package", core.APP)
+    if not re.search(r"(?m)^\s*versionName=4\.2\.9\s*$", version):
+        sys.exit("[!] 安装后 App 版本并非 v4.2.9，拒绝进入 JDWP 提取")
 
 
 def _spawn_jdb(jdb, port):
