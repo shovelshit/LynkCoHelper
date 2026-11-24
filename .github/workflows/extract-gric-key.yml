@@ -63,10 +63,10 @@ jobs:
           GRIC_HAR_B64: ${{ secrets.GRIC_HAR_B64 }}
         run: python3 LynkCoHelper/tools/extract_gric_auto.py
 
-      # 未配置 GRIC_HAR_B64 / 扫描未命中时，候选清单是唯一产出：
-      # 下载后本地跑 tools/extract_gric_key.py har <capture.har> --secret <候选>
-      - name: 上传候选密钥清单（未验证时用于本地复算）
-        if: always()
+      # 仅失败时上传：候选清单含明文候选，命中时由脚本自动删除防泄漏
+      # （密钥经 geely_env.json + 一次性链接送达）
+      - name: 上传候选密钥清单（未命中时用于本地复算）
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: gric-candidates

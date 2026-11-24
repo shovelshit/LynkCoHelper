@@ -137,17 +137,6 @@ def app_main_pid():
     return None
 
 
-def dump_proc_table():
-    """打印 App 全部进程（诊断多进程/重启行为）。"""
-    try:
-        out = core.adb("shell", "ps", "-A").strip()
-        for line in out.splitlines():
-            if "lynkco" in line:
-                print(f"    [proc] {line.strip()}")
-    except Exception as e:
-        print(f"    [!] ps 采集失败：{e}")
-
-
 def snapshot_heap(pid, snap_dir, seq, block_mb=32):
     """dump 目标进程 dalvik 主堆到分块文件，高地址块优先。
 
@@ -184,68 +173,55 @@ def snapshot_heap(pid, snap_dir, seq, block_mb=32):
 
 
 def launch_app_and_wait():
-    """正常启动 App（无需调试器），先点掉隐私协议，再高地址优先抓堆快照。
+    """启动 App -> 点隐私协议 -> 跨崩溃重启跟踪主进程抓堆快照。
 
-    x86_64/libndk 路线下点掉隐私协议后，加固壳的 arm64 代码在翻译执行中
-    SIGSEGV（run 38363894876 实证），进程会在密钥解密后不久崩溃。时序上
-    两步走：
-      1. 紧凑循环点「同意」——SDK init 被隐私协议阻塞，点不中则密钥
-         永远不解密（run 38363820950 实证：没点中，堆里无密钥）；
-      2. 点中后立即高地址优先分块快照——新分配的配置对象（含密钥）
-         偏向堆尾，崩溃前的 partial 快照最可能覆盖。
-    返回 (alive, [快照路径])。"""
+    实证（run 38369132429）：壳在 libndk 翻译下周期性 SIGSEGV，系统自动
+    重启 App；重启后的进程会完成 SDK init、密钥解密进配置对象。因此：
+      1. 紧凑循环点「同意」（SDK init 被隐私协议阻塞，点不中则密钥不解密）；
+      2. 对每轮存活窗口抓高地址优先全堆快照（新对象偏向堆尾）；
+      3. 进程崩溃即停，用快照离线扫。
+    返回 [快照文件路径]（可为空；快照已覆盖活进程全堆，无需另做活扫）。"""
     print(f"[*] 启动 App: {core.ACTIVITY}")
     core.adb("shell", "am", "start", "-n", core.ACTIVITY)
 
-    # 1. 等 PID 出现（TCG 下 am start 拉起进程可能要几分钟）
-    pid_deadline = time.time() + (240 if core.SLOW_VM else 60)
-    pid = ""
-    while time.time() < pid_deadline:
-        pid = core.adb("shell", "pidof", core.APP).strip().split()[0] \
-            if core.adb("shell", "pidof", core.APP).strip() else ""
+    # 1. 等主进程出现（TCG 下 am start 拉起进程可能要几分钟）
+    deadline = time.time() + (240 if core.SLOW_VM else 60)
+    pid = None
+    while time.time() < deadline:
+        pid = app_main_pid()
         if pid:
             break
         time.sleep(5)
     if not pid:
-        print("[警告] 未等到 App 进程（启动失败或被反调试拦截？），仍继续尝试扫描")
-        return False, []
-    print(f"[*] App 进程 PID = {pid}")
+        print("[警告] 未等到 App 主进程（启动失败或被反调试拦截？）")
+        return []
+    print(f"[*] App 主进程 PID = {pid}")
 
     wait_sec = _wait_sec()
     snap_dir = tempfile.mkdtemp(prefix="gric_snap_")
-    snaps = []
+    snaps, seq = [], 0
     t0 = time.time()
 
-    # 2. 紧凑循环点隐私协议/引导页（SDK init 被它阻塞；uiautomator dump
-    #    在翻译执行下单次 ~6s，循环到点中或主进程消失/超时）
+    # 2. 紧凑循环点隐私协议/引导页（uiautomator 单次 ~6s，循环到点中/崩溃/超时）
     print("[*] 尝试点掉隐私协议/引导页（SDK 初始化的前置）...")
-    consented = False
     while time.time() - t0 < wait_sec:
-        pid = app_main_pid()
-        if pid is None:
+        if app_main_pid() is None:
             print("[警告] App 主进程已消失（未点中同意即崩溃）")
-            dump_proc_table()
-            return False, snaps
+            return snaps
         if tap_consent():
-            consented = True
             break
-    if not consented and time.time() - t0 >= wait_sec:
-        print("[警告] 始终未点中隐私协议按钮（弹窗未出现？），仍尝试快照")
 
-    # 3. 高地址优先分块快照：目标始终是当前主进程（崩溃重启后自动跟随），
+    # 3. 高地址优先分块快照：每轮覆盖当前主进程全堆，崩溃重启自动跟随；
     #    周期性补点引导页后续页；主进程消失即停
-    print("[*] SDK 初始化中，高地址优先抓主进程堆快照（崩溃前抢 partial）...")
-    dump_proc_table()
-    seq = 0
+    print("[*] SDK 初始化中，高地址优先抓主进程堆快照...")
     seen_pid = app_main_pid()
     next_tap = time.time() + 20
     while time.time() - t0 < wait_sec + 60:
         pid = app_main_pid()
         if pid is None:
-            print(f"[警告] App 主进程已消失（x86_64/libndk 崩溃常见），"
-                  f"改用已抓到的 {len(snaps)} 个堆快照块离线扫描")
-            dump_proc_table()
-            return False, snaps
+            print(f"[警告] 主进程已消失（libndk 崩溃常见），"
+                  f"用已抓到的 {len(snaps)} 个堆快照块离线扫描")
+            return snaps
         if pid != seen_pid:
             print(f"[*] 主进程 PID 变化 {seen_pid} -> {pid}（崩溃后重启），跟随新进程")
             seen_pid = pid
@@ -256,14 +232,9 @@ def launch_app_and_wait():
         if files:
             snaps.extend(files)
             seq += 1
-            print(f"    ... 已等待 {int(time.time() - t0)}s，第 {seq} 轮新增 "
-                  f"{len(files)} 块")
-        else:
-            # 全块落空：可能是未 committed 页/进程正在崩溃，交给下一轮
-            # pidof 检查兑底，不在此处退出
-            print(f"    ... 已等待 {int(time.time() - t0)}s（本轮无块落盘）")
+            print(f"    ... {int(time.time() - t0)}s，第 {seq} 轮 +{len(files)} 块")
         time.sleep(2)
-    return True, snaps
+    return snaps
 
 
 def resolve_har(cli_path):
@@ -315,9 +286,9 @@ def main():
     auto.ensure_device(args.avd)
     auto.ensure_apk()
     ensure_root()
-    alive, snaps = launch_app_and_wait()
+    snaps = launch_app_and_wait()
 
-    # 诊断：SDK init/崩溃行为看 logcat（artifact 由 workflow 一并上传）
+    # 诊断：SDK init/崩溃行为看 logcat（artifact 由 workflow 上传）
     try:
         logcat = core.adb("shell", "logcat", "-d", "-t", "8000")
         with open("/tmp/gric_logcat.txt", "w", encoding="utf-8", errors="replace") as f:
@@ -332,25 +303,17 @@ def main():
         print(f"    {CANDIDATES_FILE}，但无法复算验证——请下载候选清单后用")
         print("    tools/extract_gric_key.py har <capture.har> --secret <候选> 本地复算。")
 
-    # 进程已崩溃：只能用快照离线扫（不再重试活进程）
-    if not alive:
-        if not snaps:
-            sys.exit("[!] App 崩溃且无任何堆快照，提取失败")
-        rc = run_scan(har_path, heap_files=snaps)
-        if rc == 0 and os.path.exists(os.path.join(HERE, "..", "geely_env.json")):
-            print("[+] 提取完成（离线快照），密钥已写入 LynkCoHelper/geely_env.json（gitignore）")
-        sys.exit(rc)
-
-    rc = run_scan(har_path)
-    if rc != 0 and snaps:
-        print("[*] 活进程扫描未命中，追加已抓快照离线重试 ...")
-        rc = run_scan(har_path, heap_files=snaps)
-    if rc != 0:
-        print("[*] 首次扫描未命中，追加 120s 等待后重试一次（SDK 可能仍在初始化）...")
-        time.sleep(120)
-        rc = run_scan(har_path)
-    if rc == 0 and os.path.exists(os.path.join(HERE, "..", "geely_env.json")):
-        print("[+] 提取完成，密钥已写入 LynkCoHelper/geely_env.json（gitignore）")
+    # 快照离线扫（快照已覆盖各存活窗口的全堆）；无快照时退化为活进程扫
+    rc = run_scan(har_path, heap_files=snaps) if snaps else run_scan(har_path)
+    if rc == 0:
+        # 候选清单含明文密钥，命中后删除防泄漏（密钥仅经 geely_env.json/
+        # 一次性链接送达；workflow 仅在失败时才上传候选清单）
+        try:
+            os.remove(CANDIDATES_FILE)
+        except OSError:
+            pass
+        print("[+] 提取完成，密钥已写入 LynkCoHelper/geely_env.json（gitignore），"
+              "经一次性链接送达")
     sys.exit(rc)
 
 

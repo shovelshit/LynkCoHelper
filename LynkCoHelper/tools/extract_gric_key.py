@@ -8,7 +8,7 @@ extract_gric_key.py —— GRIC X-SIGNATURE 密钥提取与回归验证（脱敏
 
   scan  在线提取：dump 设备 Java 堆 -> 三级降级找密钥 -> 复算验证（全部内置）
         python3 tools/extract_gric_key.py scan [--serial <SN>] [--pid <PID>]
-                    [--max-mb 1200] [--har <capture.har>] [--write] [--mask]
+                    [--max-mb 1200] [--har <capture.har>] [--write] [--show]
 
         验证优先级（复算逻辑写死在脚本内，无需外部步骤）：
           1. STS 现场自验证：密钥候选与签名同现场，HMAC 配对即实锤
@@ -24,7 +24,7 @@ extract_gric_key.py —— GRIC X-SIGNATURE 密钥提取与回归验证（脱敏
           c. 全堆 32-hex 形态扫描（兜底，候选多但复算仍是本地零成本）
 
         --write   验证命中后自动写入 ../geely_env.json 的 gricSecret 字段
-        --mask    输出时打码密钥（默认全显，仅本地终端使用）
+        --show    输出明文密钥（默认打码，防 CI 日志泄漏）
 
   har   离线回归：用已知密钥复算 HAR 里的全部签名请求，要求 100% 一致
         python3 tools/extract_gric_key.py har <capture.har> [--secret <KEY>]
@@ -33,7 +33,7 @@ extract_gric_key.py —— GRIC X-SIGNATURE 密钥提取与回归验证（脱敏
 
   vehicle  在线/离线提取车辆头：dump 堆 -> 扫 x-vehicle-identifier/series 现场
         python3 tools/extract_gric_key.py vehicle [--serial <SN>] [--pid <PID>]
-                    [--max-mb 1200] [--write] [--mask]
+                    [--max-mb 1200] [--write] [--show]
         python3 tools/extract_gric_key.py vehicle --dump <heap.bin>   # 离线分析已有 dump
 
         --write  命中后写入 ../geely_env.json 的 vehicle 字段
@@ -618,7 +618,8 @@ def main():
     p_scan.add_argument("--candidates", default=None, metavar="JSON",
                         help="把各层级候选密钥写入 JSON 文件（CI 产物/本地事后复算用）")
     p_scan.add_argument("--write", action="store_true", help="命中后写入 geely_env.json")
-    p_scan.add_argument("--mask", action="store_true", help="输出打码密钥")
+    p_scan.add_argument("--show", dest="mask", action="store_false",
+                        help="输出明文密钥（默认打码）")
     p_scan.set_defaults(func=cmd_scan)
 
     p_har = sub.add_parser("har", help="离线回归：复算 HAR 全部签名（要求 100%%）")
@@ -632,7 +633,8 @@ def main():
     p_veh.add_argument("--max-mb", type=int, default=1200, help="最多 dump 多少 MB 堆")
     p_veh.add_argument("--dump", default=None, help="离线模式：分析已有的堆 dump 文件")
     p_veh.add_argument("--write", action="store_true", help="命中后写入 geely_env.json 的 vehicle 字段")
-    p_veh.add_argument("--mask", action="store_true", help="输出打码")
+    p_veh.add_argument("--show", dest="mask", action="store_false",
+                       help="输出明文（默认打码）")
     p_veh.set_defaults(func=cmd_vehicle)
 
     args = ap.parse_args()
