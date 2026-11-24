@@ -453,8 +453,8 @@ def main():
     parser.add_argument("--env", help="指定输出 env.json 路径（默认业务目录）")
     parser.add_argument("--apk-version", default=os.environ.get("LYNKCO_APK_VERSION") or "4.3.1",
                         help="Release 版本 X.Y.Z 或 latest（默认 4.3.1）")
-    parser.add_argument("--app-key", default=keyvault.DEFAULT_APP_KEY)
-    parser.add_argument("--app-code", default=keyvault.DEFAULT_APP_CODE)
+    parser.add_argument("--app-key", default=os.environ.get("LYNKCO_APP_KEY"))
+    parser.add_argument("--app-code", default=os.environ.get("LYNKCO_APP_CODE"))
     args = parser.parse_args()
     if args.env:
         core.ENV_JSON = os.path.abspath(args.env)

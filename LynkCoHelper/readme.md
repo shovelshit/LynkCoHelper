@@ -17,20 +17,16 @@
 | `lynkco_notify.py` | Bark、飞书、钉钉、企业微信推送工具 |
 | `lynkco_daily_tasks.py` | 顶层入口：编排签到 + 分享 + 积分查询并推送结果 |
 
-4.3.x 的调用链、固定槽位、环境检查及验证边界记录在项目维护者的内部研究文档中，不随公开仓库分发。
-
 ## AppSecret 自动提取
 
-提取 API 密钥（`nativeAppKey` / `nativeAppSecret`），写入 `env.json` 的 `secrets` 段。Action 入口支持直接从已验证的 4.3.0 / 4.3.1 APK 离线提取 KeyVault 固定槽位，无需 Android 环境；不含 KeyVault 的旧版保留模拟器 + jdb 流程。未知 KeyVault 库会明确报错，避免错误套用偏移。
+提取 API 密钥（`nativeAppKey` / `nativeAppSecret`），写入 `env.json` 的 `secrets` 段。统一入口支持直接从已验证的 4.3.0 / 4.3.1 APK 离线提取 KeyVault 固定槽位，无需 Android 环境；不含 KeyVault 的 4.2.9 保留模拟器 + jdb 流程。未知 KeyVault 库会明确报错，避免错误套用偏移。
 
-### 按平台入口（`tools/`）
+### 提取入口（`tools/`）
 
 | 脚本 | 平台 | 说明 |
 | --- | --- | --- |
-| `tools/extract_appsecret_mac.py` | macOS（HVF） | 原版交互式流程，固定 APK 4.2.9 |
-| `tools/extract_appsecret_ubuntu.py` | WSL2 Ubuntu（KVM） | 固定 APK 4.2.9，环境缺失自动下载 |
-| `tools/extract_appsecret_windows.py` | Windows 原生编排 | 固定 APK 4.2.9，模拟器跑在 WSL2 |
-| `tools/extract_appsecret_github_action.py` | GitHub Actions / 本地 Python | 4.3.x 优先离线提取；旧版自动准备 Android 环境 |
+| `tools/extract_appsecret_github_action.py` | Python / GitHub Actions | 统一入口：4.3.x 离线提取；4.2.9 才准备 Android 环境 |
+| `tools/extract_appsecret_mac.py`、`extract_appsecret_ubuntu.py`、`extract_appsecret_windows.py` | 旧版兼容入口 | 仅保留 4.2.9 的模拟器 / jdb 流程 |
 
 本地 4.3.x 示例（在仓库根目录执行）：
 
@@ -50,7 +46,7 @@ python3 LynkCoHelper/tools/extract_appsecret_github_action.py --apk /path/to/lyn
 ### 安全说明
 
 - 新增静态路径隐藏完整凭据；旧版调试流程在 CI 中脱敏，本地可能显示明文。生成的 `env.json` 已被 gitignore；CI 沿用一次性链接送达明文的既有行为。
-- Action 的 `apk_version` 默认 `4.3.1`；指定 `X.Y.Z` 使用对应版本 Release，`latest` 读取 `apk-latest/lynkco-latest.apk`（当前恢复为 4.3.1，后续随 Release 更新）。原有模拟器入口固定为 4.2.9，与 `latest` 分开；x86_64 模拟器镜像固定为 `sysimg-x86_64-33-r09`，静态路径不需要它。
+- Action 的 `apk_version` 默认 `4.3.1`；指定 `X.Y.Z` 使用对应版本 Release，`latest` 读取 `apk-latest/lynkco-latest.apk`（当前为 4.3.1，后续随 Release 更新）。离线静态路径不依赖模拟器；只有 4.2.9 兼容流程使用固定的 x86_64 模拟器镜像。
 
 ## 快速开始
 
