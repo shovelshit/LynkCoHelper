@@ -479,13 +479,11 @@ def main():
     if _IS_MAC and platform.machine() != "arm64":
         sys.exit("[!] Intel mac 不支持：emulator 的 darwin-x86_64 包不含 "
                  "qemu-system-aarch64，跑不了 arm64 镜像。请改用 x86_64 Linux"
-                 "（qemu 全系统 TCG 模拟）或 arm64 真机（adb 连接后跑本地版 "
-                 "tools/extract_appsecret_mac.py）。")
+                 "（qemu 全系统 TCG 模拟）或 arm64 真机（通过 adb 连接后重试统一入口）。")
     if not _IS_MAC and platform.machine() != "x86_64":
         sys.exit("[!] Linux ARM64 无官方 emulator/platform-tools 包。请改用 "
                  "x86_64 Linux（ubuntu runner，qemu 全系统 TCG 模拟）、"
-                 "Apple Silicon Mac（HVF 原生）或 arm64 真机（本地版 "
-                 "tools/extract_appsecret_mac.py）。")
+                 "Apple Silicon Mac（HVF 原生）或 arm64 真机（通过 adb 连接后重试统一入口）。")
     if _IS_X86_IMAGE and (_IS_MAC or platform.machine() != "x86_64"):
         sys.exit("[!] LYNKCO_IMAGE_ABI=x86_64 实验仅支持 x86_64 Linux 宿主"
                  "（x86_64 镜像 + KVM + libndk 翻译 arm64 库）。")

@@ -2,8 +2,7 @@
 """
 appsecret_core.py —— AppSecret 提取的平台无关共享核心（非入口，勿直接运行）。
 
-供 macOS、Ubuntu、Windows 本地入口以及 GitHub Action 的旧版 JDWP
-分支共用的逻辑：
+供统一 Python / GitHub Action 入口的旧版 JDWP 分支共用的逻辑：
   - 常量与目标信息（App/Activity/断点类/端口/env.json 路径）
   - 工具探测（find_adb / find_jdb / find_emulator，平台感知）
   - 下载工具（_download / _try_download / _confirm_download）
@@ -205,7 +204,7 @@ def find_emulator():
 
 
 # ---------------------------------------------------------------------------
-# 下载工具（两个平台入口共用）
+# 下载工具（统一入口共用）
 # ---------------------------------------------------------------------------
 
 def _fmt_dur(seconds):
@@ -1151,7 +1150,7 @@ def get_single_candidate():
     candidates = get_candidates()
     if len(candidates) != 1:
         raise Disconnected("APK 有多个候选密钥类；当前入口无法验证 b/c 字段，"
-                           "请使用支持运行时校验的 macOS 提取入口")
+                           "请使用统一提取入口进行运行时校验")
     return candidates[0]
 
 

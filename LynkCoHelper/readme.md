@@ -25,8 +25,7 @@
 
 | 脚本 | 平台 | 说明 |
 | --- | --- | --- |
-| `tools/extract_appsecret_github_action.py` | Python / GitHub Actions | 统一入口：4.3.x 离线提取；4.2.9 才准备 Android 环境 |
-| `tools/extract_appsecret_mac.py`、`extract_appsecret_ubuntu.py`、`extract_appsecret_windows.py` | 旧版兼容入口 | 仅保留 4.2.9 的模拟器 / jdb 流程 |
+| `tools/extract_appsecret_github_action.py` | Python / GitHub Actions | 唯一入口：4.3.x 离线提取；4.2.9 才准备 Android 环境 |
 
 本地 4.3.x 示例（在仓库根目录执行）：
 
